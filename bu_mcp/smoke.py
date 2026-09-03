@@ -687,18 +687,58 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		bad('macro: an ordinary name is accepted as is')
 
 	# 6. Доменный гейт макроса кормится URL из шагов, включая вложенные.
-	urls = macro_urls(
-		{
-			'steps': [
-				{'tool': 'browser_navigate', 'params': {'url': 'https://a.example'}},
-				{'tool': 'browser_click', 'handle': {'url': 'https://b.example'}},
-			]
-		}
-	)
-	if set(urls) == {'https://a.example', 'https://b.example'}:
-		ok('macro: every URL baked into the steps is visible to the domain gate')
+	# 6. Доменный гейт макроса кормится ИТОГОВЫМИ адресами шагов.
+	#
+	# «Итоговыми» — то есть теми, по которым шаг реально пойдёт: точка входа
+	# вынесена в переменную `start_url` именно чтобы её подменяли при вызове, и
+	# гейт, читающий литерал из файла, проверял бы не тот макрос, который сейчас
+	# исполнится. Плюс `expect.url_after`: адрес, на который клик увёл при
+	# записи, — это следующая страница сценария, и она обязана быть в allowlist.
+	gate_macro = {
+		'vars': {'start_url': {'value': 'https://a.example/', 'secret': False}},
+		'steps': [
+			{
+				'n': 1,
+				'tool': 'browser_navigate',
+				'params': {'url': {'$var': 'start_url'}},
+				'url': 'https://a.example/',
+			},
+			{
+				'n': 2,
+				'tool': 'browser_click',
+				# Хендл снят на пустой вкладке: это НАБЛЮДЕНИЕ времени записи,
+				# никуда не ведущее при повторе.
+				'hint': {'url': 'about:blank', 'xpath': 'html/body/button'},
+				'expect': {'url_changed': True, 'url_after': 'https://c.example/next'},
+			},
+		],
+	}
+
+	def urls_of(macro, values=None):
+		"""Множество адресов, которые видит гейт. ``None`` — helper не принял values."""
+		try:
+			out = macro_urls(macro) if values is None else macro_urls(macro, values)
+		except TypeError as exc:
+			print(f'  _macro_urls(macro, values): {exc}')
+			return None
+		return {(u if isinstance(u, str) else u[0]) for u in out}
+
+	default_urls = urls_of(gate_macro)
+	if default_urls is not None and {'https://a.example/', 'https://c.example/next'} <= default_urls:
+		ok('macro: the gate sees both the entry point and the URL a recorded click led to')
 	else:
-		bad('macro: every URL baked into the steps is visible to the domain gate', str(urls))
+		bad('macro: the gate sees both the entry point and the URL a recorded click led to', str(default_urls))
+
+	overridden = urls_of(gate_macro, {'start_url': 'https://evil.example/'})
+	if overridden is not None and 'https://evil.example/' in overridden and 'https://a.example/' not in overridden:
+		ok('macro: a start_url handed to macro_run replaces the recorded one for the gate')
+	else:
+		bad('macro: a start_url handed to macro_run replaces the recorded one for the gate', str(overridden))
+
+	if default_urls is not None and 'about:blank' not in default_urls:
+		ok('macro: an element handle recorded on about:blank is not gated as a destination')
+	else:
+		bad('macro: an element handle recorded on about:blank is not gated as a destination', str(default_urls))
 
 	# 7. Листинг журнала не тащит наружу полный хендл — иначе он стоил бы как состояние.
 	row = summary(
@@ -1358,6 +1398,27 @@ async def journal_macro_checks(session) -> None:
 		else:
 			bad('a journal entry reuses the delta the action already measured', json.dumps(entry.get('delta'))[:200])
 
+		# journal.capture отдаёт хендл, url и контекст страницы разом. Вьюпорт —
+		# не украшение: без него повтор в другом окне не отличит «элемент уехал
+		# в гамбургер» от «элемента нет», и проверка вырождается в предупреждение.
+		page = entry.get('page') or {}
+		viewport = page.get('viewport') or {}
+		if viewport.get('width') and viewport.get('height') and 'title' in page:
+			ok(
+				'a journal entry carries the page context from journal.capture',
+				f'{viewport.get("width")}x{viewport.get("height")}',
+			)
+		else:
+			bad('a journal entry carries the page context from journal.capture', json.dumps(page)[:200])
+		navigated = [r for r in rows if r.get('tool') == 'browser_navigate']
+		if navigated and ((navigated[-1].get('page') or {}).get('viewport') or {}).get('width'):
+			ok('browser_navigate records the page context too, so a macro that starts with it knows its viewport')
+		else:
+			bad(
+				'browser_navigate records the page context too, so a macro that starts with it knows its viewport',
+				json.dumps(navigated[-1] if navigated else {})[:200],
+			)
+
 		# Цена журнала должна быть НИЖЕ цены дельты, к которой он пристёгнут.
 		# Сравниваются медианы по всем записям, а не один замер: обе величины
 		# субмиллисекундные, и одиночная проба на них шумит сильнее, чем разница.
@@ -1407,6 +1468,11 @@ async def journal_macro_checks(session) -> None:
 			ok('macro_list shows the saved macro')
 		else:
 			bad('macro_list shows the saved macro', text_of(res)[:240])
+		recorded_on = (shown.get('macro') or {}).get('recorded_on') or {}
+		if (recorded_on.get('viewport') or {}).get('width'):
+			ok('the saved macro carries the viewport it was recorded at', json.dumps(recorded_on.get('viewport')))
+		else:
+			bad('the saved macro carries the viewport it was recorded at', json.dumps(recorded_on)[:200])
 
 		# -- 4. ПЕРЕЗАГРУЗКА: индексы становятся недействительными ----------- #
 		res = await session.call_tool('browser_navigate', {'url': 'https://example.com'})
@@ -1443,6 +1509,11 @@ async def journal_macro_checks(session) -> None:
 			ok('macro_run is strict by default')
 		else:
 			bad('macro_run is strict by default', body[:200])
+		warnings = json.dumps(as_json(body).get('warnings') or [])
+		if 'no viewport recorded' not in warnings:
+			ok('the replay checks the recorded viewport instead of warning that there is none')
+		else:
+			bad('the replay checks the recorded viewport instead of warning that there is none', warnings[:200])
 		probe = await ev(MACRO_PROBE_JS)
 		print(f'  after macro_run: {probe.strip()[:120]}')
 		if f'value=[{MACRO_TEXT}]' in probe and 'done=yes' in probe:
@@ -1520,6 +1591,56 @@ async def index_of(session, needle: str) -> int | None:
 	return None
 
 
+#: Макрос для проверки обхода гейта через vars: точка входа в переменной, ровно
+#: как её выносит `journal.to_macro`. Кладётся на диск руками — записывать его
+#: браузером незачем, проверяется поведение гейта, а не запись.
+GATE_MACRO_NAME = 'bu_mcp_smoke_gate'
+GATE_MACRO = {
+	'name': GATE_MACRO_NAME,
+	'version': 1,
+	'created': '2026-01-01T00:00:00+00:00',
+	'source': {'entries': 1, 'kept': 1, 'dropped': 0},
+	'recorded_on': {'url': 'https://example.com/'},
+	'vars': {
+		'start_url': {'source': 'entry point of the recording', 'secret': False, 'value': 'https://example.com/'},
+	},
+	'steps': [
+		{
+			'n': 1,
+			'seq': 1,
+			'tool': 'browser_navigate',
+			'params': {'url': {'$var': 'start_url'}},
+			'url': 'https://example.com/',
+			'url_before': 'https://example.com/',
+			'expect': {},
+		}
+	],
+	'dropped': [],
+	'issues': [],
+	'incomplete': False,
+}
+
+
+def write_gate_macro() -> Path:
+	"""Положить GATE_MACRO туда, откуда его читает сервер (``journal.macro_path``)."""
+	from bu_mcp import journal as journal_mod
+
+	path = Path(journal_mod.macro_path(GATE_MACRO_NAME))
+	path.parent.mkdir(parents=True, exist_ok=True)
+	path.write_text(json.dumps(GATE_MACRO, indent=2), encoding='utf-8')
+	return path
+
+
+async def current_url_of(session) -> str:
+	st = await session.call_tool('browser_state', {})
+	if st.isError:
+		return ''
+	for tab in state_of(st).get('tabs', []):
+		if tab.get('current'):
+			return str(tab.get('url') or '')
+	return ''
+
+
 async def allowlist_check() -> None:
 	"""Отдельная сессия сервера с BU_MCP_ALLOWED_DOMAINS: allow-only, deny-by-default."""
 	print('\n[9] BU_MCP_ALLOWED_DOMAINS=example.com (separate server process)')
@@ -1529,6 +1650,7 @@ async def allowlist_check() -> None:
 		env={**os.environ, 'PYTHONPATH': str(ROOT), 'PYTHONUNBUFFERED': '1', 'BU_MCP_ALLOWED_DOMAINS': 'example.com'},
 		cwd=str(ROOT),
 	)
+	gate_macro_file = write_gate_macro()
 	async with stdio_client(params) as (read, write):
 		async with ClientSession(read, write) as session:
 			await session.initialize()
@@ -1547,6 +1669,37 @@ async def allowlist_check() -> None:
 			else:
 				bad('allowlist lets a listed domain through', text_of(res)[:200])
 
+			# -- обход гейта через vars ------------------------------------- #
+			# Точка входа макроса — переменная. Если гейт смотрит в файл, а не в
+			# то, чем переменную подменили при вызове, то macro_run уводит браузер
+			# на любой домен, и ни один шаг при этом не проходит через
+			# _check_domain_gate. Проверяется и отказ, и то, что он случился ДО
+			# первого шага: страница обязана остаться прежней.
+			before_url = await current_url_of(session)
+			res = await session.call_tool('macro_run', {'name': GATE_MACRO_NAME, 'vars': {'start_url': 'https://www.iana.org/'}})
+			body = text_of(res)
+			after_url = await current_url_of(session)
+			print(f'  macro_run vars={{start_url: iana.org}} -> isError={res.isError}: {body[:200]}')
+			print(f'  page before {before_url!r} -> after {after_url!r}')
+			if res.isError and 'BU_MCP_ALLOWED_DOMAINS' in body and 'iana.org' in body:
+				ok('allowlist blocks a macro whose start_url is overridden to an unlisted domain')
+			else:
+				bad('allowlist blocks a macro whose start_url is overridden to an unlisted domain', body[:300])
+			if 'iana.org' not in after_url and after_url == before_url:
+				ok('the blocked macro did not run a single step', f'still on {after_url or "<unknown>"}')
+			else:
+				bad('the blocked macro did not run a single step', f'{before_url!r} -> {after_url!r}')
+
+			# Обратная сторона: гейт не должен запрещать макрос, чьи итоговые
+			# адреса в списке. Иначе «закрыли дыру» означало бы «выключили макросы».
+			res = await session.call_tool('macro_run', {'name': GATE_MACRO_NAME})
+			body = text_of(res)
+			print(f'  macro_run with the recorded start_url -> isError={res.isError}: {body[:160]}')
+			if 'BU_MCP_ALLOWED_DOMAINS' not in body:
+				ok('the gate lets through a macro that stays on a listed domain')
+			else:
+				bad('the gate lets through a macro that stays on a listed domain', body[:300])
+
 			# закрываем свою вкладку
 			st = await session.call_tool('browser_state', {})
 			if not st.isError:
@@ -1558,6 +1711,10 @@ async def allowlist_check() -> None:
 							ok('allowlist run cleaned up its tab')
 						else:
 							bad('allowlist run cleaned up its tab', text_of(cl)[:150])
+	try:
+		gate_macro_file.unlink()
+	except Exception as exc:  # noqa: BLE001
+		print(f'  cleanup: could not remove {gate_macro_file}: {exc}')
 
 
 def report() -> int:

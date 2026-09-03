@@ -1268,6 +1268,11 @@ class BuMcpServer:
 		baseline = await waiting_mod.navigation_baseline(session)
 		# baseline уже держит URL прежнего документа — второй раз за ним не ходим.
 		self._journal_note(url_before=baseline.get('url'))
+		# Хендла у навигации нет, а контекст страницы нужен: навигация — самый
+		# частый ПЕРВЫЙ шаг сценария, и `recorded_on.viewport` макроса берётся из
+		# первой же записи. Снимается ДО перехода: вьюпорт от него не меняется,
+		# а вот дожидаться нового документа ради двух чисел незачем.
+		await self._journal_capture(session)
 
 		try:
 			result = await tools.registry.execute_action(
@@ -1559,29 +1564,62 @@ class BuMcpServer:
 		if entry is not None:
 			entry.update(fields)
 
-	async def _journal_handle(self, session: BrowserSession, index: Any) -> None:
-		"""Снять полный хендл элемента в запись текущего вызова.
+	async def _journal_capture(self, session: BrowserSession, index: Any = None) -> None:
+		"""Снять в запись всё, что нужно повтору: хендл элемента и контекст страницы.
 
-		``describe_handle`` возвращает ровно тот dict, который ``resolve_index``
-		принимает обратно как ``hint`` — это и есть то, на чём стоит повтор без
-		модели в цикле. Индексы в макрос не годятся: они живут ровно один снимок.
+		Это ОДИН вызов ``journal.capture``, а не сборка хендла здесь. Разница не
+		косметическая: ``capture`` кладёт в запись ещё и ``page`` — заголовок и
+		вьюпорт, — а вьюпорт нужен ``macro.run`` как предусловие. Адаптивная
+		вёрстка меняет НАБОР элементов, а не их расположение: сценарий,
+		записанный на 1440px, в 375px падает на «кнопки нет», хотя кнопка есть —
+		она уехала в гамбургер. Без записанного вьюпорта проверка деградирует до
+		предупреждения «вьюпорт не записан», и причину отказа установить нечем.
+
+		Что именно достойно записи, решает журнал, а не сервер: собирая хендл
+		здесь, мы молча решали это за него — и ровно поэтому ``page`` не попадал
+		в записи вовсе.
+
+		``index=None`` — законный случай (``send_keys``, ``browser_navigate``,
+		``scroll`` без элемента): тогда снимается только контекст страницы, и
+		``recorded_on`` макроса всё равно получает вьюпорт, с какого бы шага
+		сценарий ни начинался.
 
 		Вызывать ДО действия и по УЖЕ разрешённому индексу: после клика элемент
 		может исчезнуть, а до резолва индекс мог указывать не туда.
 
-		Fail-open: не смогли — записываем причину и идём дальше. Замерено на
-		headless Chrome: медиана 0.94 мс (min 0.78, max 2.94) — дешевле нижней
-		границы дельты (2.2 мс).
+		``url_before`` из ``capture`` ставится только если его ещё нет: там, где
+		рядом снимается проба дельты, URL уже взят из неё, и переписывать его
+		более поздним значением незачем.
+
+		Fail-open по построению: ``capture`` не бросает вовсе, а при выключенном
+		журнале (``BU_MCP_JOURNAL=0``) возвращает пустой dict. Замерено на
+		headless Chrome, медианы: ``describe_handle`` 1.58 мс -> ``capture``
+		2.12 мс, из них 0.51 мс — тот самый ``Runtime.evaluate`` за url/title/
+		вьюпорт. Дельта, к которой запись пристёгнута, стоит 7.8 мс.
 		"""
 		entry = _JOURNAL_ENTRY.get()
-		if entry is None or index is None:
+		if entry is None:
 			return
 		started = time.perf_counter()
 		try:
-			resolve_mod = importlib.import_module('bu_mcp.resolve')
-			entry['handle'] = await resolve_mod.describe_handle(session, int(index))
+			journal_mod = importlib.import_module('bu_mcp.journal')
+			captured = await journal_mod.capture(session, None if index is None else int(index))
 		except Exception as exc:  # noqa: BLE001
+			# Сюда попадает только отсутствие модуля или мусор в index: сам
+			# capture гасит свои ошибки внутри.
+			captured = {}
 			entry['handle_error'] = f'{type(exc).__name__}: {exc}'
+		if captured.get('handle') is not None:
+			entry['handle'] = captured['handle']
+		elif index is not None and 'handle_error' not in entry:
+			entry['handle_error'] = (
+				f'journal.capture returned no handle for index {index}: the element is not in the current '
+				f'snapshot, so this step has nothing to replay from'
+			)
+		if captured.get('page'):
+			entry['page'] = captured['page']
+		if captured.get('url_before') and not entry.get('url_before'):
+			entry['url_before'] = captured['url_before']
 		entry['cost_ms'] = float(entry.get('cost_ms') or 0.0) + (time.perf_counter() - started) * 1000.0
 
 	@staticmethod
@@ -1752,7 +1790,7 @@ class BuMcpServer:
 		await self._check_domain_gate('click')
 
 		node, live_index, info = await self._resolve(session, int(args['index']), what='hovered')
-		await self._journal_handle(session, live_index)
+		await self._journal_capture(session, live_index)
 		before = await self._delta_start(session)
 		self._journal_note(url_before=before.get('url'), resolved_index=live_index)
 		geo = await self._hover_point(session, node, live_index)
@@ -1832,7 +1870,7 @@ class BuMcpServer:
 
 		_node, live_index, info = await self._resolve(session, int(args['index']))
 		# Хендл в журнал снимается ЗДЕСЬ: индекс уже разрешён, элемент ещё жив.
-		await self._journal_handle(session, live_index)
+		await self._journal_capture(session, live_index)
 		tabs_before = await self._tab_snapshot(session)
 		# Снимок вкладок уже есть — второй раз за ним не ходим.
 		before = await self._delta_start(session, tabs=tabs_before)
@@ -1976,7 +2014,7 @@ class BuMcpServer:
 		await self._check_domain_gate('input')
 
 		_node, live_index, info = await self._resolve(session, int(args['index']), what='typed into')
-		await self._journal_handle(session, live_index)
+		await self._journal_capture(session, live_index)
 		before = await self._delta_start(session)
 		self._journal_note(url_before=before.get('url'), resolved_index=live_index)
 		try:
@@ -2055,7 +2093,7 @@ class BuMcpServer:
 		self._journal_note(url_before=before.get('url'))
 		# У send_keys индекса нет, у select_dropdown есть — хендл снимается только
 		# там, где ему есть на что смотреть.
-		await self._journal_handle(session, args.get('index'))
+		await self._journal_capture(session, args.get('index'))
 		text = await self._run_registry_action(name, args)
 		extra = ('active',) if name in self.DELTA_FOCUS_COUNTS else ()
 		delta = await self._delta_end(session, before, extra_significant=extra)
@@ -2139,8 +2177,11 @@ class BuMcpServer:
 
 		index = args.get('index')
 		node = None
-		if index is not None and int(index) != 0:
-			await self._journal_handle(session, index)
+		scroll_target = index if index is not None and int(index) != 0 else None
+		# Контекст страницы снимается и без элемента: скролл может быть первым
+		# шагом сценария, и тогда вьюпорт в макрос попадёт только отсюда.
+		await self._journal_capture(session, scroll_target)
+		if scroll_target is not None:
 			try:
 				node = await session.get_element_by_index(int(index))
 			except Exception:  # noqa: BLE001
@@ -2363,41 +2404,140 @@ class BuMcpServer:
 			return cls._macro_dir() / f'{name}.json'
 
 	@staticmethod
-	def _macro_urls(macro: Any) -> list[str]:
-		"""Все URL, зашитые в шаги макроса (обход в глубину по ``url``-ключам)."""
-		found: list[str] = []
+	def _macro_values(macro: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, Any]:
+		"""Итоговые значения переменных: ровно те, с которыми ``macro.run`` пойдёт по шагам.
 
-		def walk(node: Any) -> None:
+		Считает их НЕ сервер, а сам ``macro._resolve_vars`` — та самая функция,
+		которую через секунду вызовет ``macro.run``. Второй вычислитель тех же
+		значений в этом файле означал бы гейт, проверяющий не тот макрос, который
+		исполнится: достаточно разойтись в одном правиле приоритета (override
+		поверх значения из файла), и проверка становится декоративной.
+
+		Аварийная ветка (модуля нет, сигнатура другая) считает объединение
+		«значения из файла + переданные в вызов». Она заведомо ШИРЕ настоящей:
+		проверит и то, что уже перекрыто. Лишний отказ здесь дешевле пропуска.
+		"""
+		overrides = dict(overrides or {})
+		try:
+			macro_mod = importlib.import_module('bu_mcp.macro')
+			values, _missing = macro_mod._resolve_vars(macro, overrides)
+			if isinstance(values, dict):
+				return values
+		except Exception as exc:  # noqa: BLE001
+			logger.warning('macro._resolve_vars unavailable, the domain gate falls back to a wider check: %r', exc)
+
+		values = {}
+		for name, spec in ((macro or {}).get('vars') or {}).items():
+			value = spec.get('value') if isinstance(spec, dict) else spec
+			if value is not None:
+				values[str(name)] = value
+		values.update(overrides)
+		return values
+
+	@staticmethod
+	def _macro_urls(macro: Any, values: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+		"""Куда макрос ПОЙДЁТ, с подстановкой переменных. ``[(url, где это записано)]``.
+
+		Проверять надо итоговые адреса, а не записанные в файл. Точка входа
+		вынесена ``to_macro`` в переменную ``start_url`` именно для того, чтобы её
+		подменяли при вызове — значит ``macro_run(vars={'start_url': ...})`` уводит
+		сценарий на произвольный домен, и гейт, читающий литерал из файла, этого
+		не увидит. Поэтому ``params`` каждого шага сначала материализуются теми же
+		значениями, что получит ``macro.run``, и только потом обходятся.
+
+		Что попадает в проверку:
+
+		* ``params`` после подстановки — это адрес, по которому шаг физически
+		  пойдёт (``browser_navigate``);
+		* ``step['url']`` — записанный литерал, но ТОЛЬКО как запасной вариант,
+		  когда переменная не разрешилась: тогда неизвестно, куда шаг пойдёт, и
+		  честнее проверить хотя бы записанное (``macro.run`` на такой переменной
+		  всё равно остановится на предусловии);
+		* ``expect.url_after`` — адрес, на который действие увело при записи. Это
+		  следующая страница сценария: клик по ссылке на чужой домен уводит
+		  браузер туда же, куда увела бы навигация, только гейт про неё не знает,
+		  потому что дальше шаги идут уже мимо ``_check_domain_gate``.
+
+		Что НЕ попадает — и почему это не ослабление:
+
+		* ``hint['url']`` (и ``recorded_on``) — адрес страницы, на которой элемент
+		  БЫЛ ВИДЕН при записи. Это наблюдение прошлого, а не цель: повтор по
+		  нему никуда не идёт. Более того, ``resolve`` гардит несовпадение URL, а
+		  сам ``macro_run`` уже проверен ``_check_domain_gate`` по ТЕКУЩЕЙ
+		  странице, так что оказаться на запрещённом домене можно только через
+		  навигацию, а она проверяется. Зато цена гейта по хендлу вполне
+		  реальная: хендл, снятый на ``about:blank`` (пустая вкладка, куда
+		  сценарий сам же и навигируется первым шагом), не совпадает ни с одной
+		  маской и отклонял бы совершенно законный макрос при любом непустом
+		  allowlist.
+		"""
+		values = values or {}
+		unresolved = object()
+		found: list[tuple[str, str]] = []
+
+		def materialize(node: Any) -> Any:
+			"""Подстановка переменных. Неразрешённая -> сентинел (не строка, обход её не заметит)."""
+			if isinstance(node, dict):
+				if set(node) == {'$var'}:
+					return values.get(str(node['$var']), unresolved)
+				return {k: materialize(v) for k, v in node.items()}
+			if isinstance(node, list):
+				return [materialize(v) for v in node]
+			return node
+
+		def walk(node: Any, where: str, out: list[tuple[str, str]]) -> None:
 			if isinstance(node, dict):
 				for key, value in node.items():
 					if key == 'url' and isinstance(value, str) and value.strip():
-						found.append(value)
+						out.append((value, where))
 					else:
-						walk(value)
+						walk(value, where, out)
 			elif isinstance(node, list):
 				for value in node:
-					walk(value)
+					walk(value, where, out)
 
-		walk((macro or {}).get('steps'))
+		steps = (macro or {}).get('steps')
+		for i, step in enumerate((steps if isinstance(steps, list) else []), start=1):
+			if not isinstance(step, dict):
+				continue
+			label = f'step {step.get("n") or i} (`{step.get("tool") or "?"}`)'
+			from_params: list[tuple[str, str]] = []
+			walk(materialize(step.get('params')), f'{label} goes to', from_params)
+			if not from_params:
+				literal = step.get('url')
+				if isinstance(literal, str) and literal.strip():
+					from_params.append((literal, f'{label} goes to (recorded value: the variable did not resolve)'))
+			found.extend(from_params)
+
+			expect = step.get('expect')
+			if isinstance(expect, dict):
+				after = expect.get('url_after')
+				if isinstance(after, str) and after.strip():
+					found.append((after, f'{label} led to this URL when recorded'))
 		return found
 
-	def _macro_domain_gate(self, macro: dict[str, Any]) -> None:
-		"""Проверить allowlist по URL, зашитым в шаги макроса.
+	def _macro_domain_gate(self, macro: dict[str, Any], values: dict[str, Any] | None = None) -> None:
+		"""Проверить allowlist по адресам, на которые макрос уведёт браузер.
 
 		Без этого макрос был бы дырой в доменной политике: его шаги исполняет
 		``macro.py`` напрямую, минуя ``_check_domain_gate``, поэтому сохранённый
 		когда-то ``browser_navigate`` увёл бы браузер куда угодно. Проверка идёт
 		ДО первого шага: частично выполненный запрещённый макрос хуже, чем
 		невыполненный.
+
+		``values`` — значения переменных этого прогона (см. ``_macro_values``).
+		Без них проверялось бы содержимое файла, а исполнялось бы что-то другое.
 		"""
 		if not self._allowed_domains:
 			return
-		for url in self._macro_urls(macro):
+		for url, where in self._macro_urls(macro, values):
 			if not self._domain_allowed(url, treat_blank_as_allowed=False):
 				raise ToolError(
-					f'This macro carries a step pointing at {url!r}, which does not match '
+					f'This macro would take the browser to {url!r} ({where}), which does not match '
 					f'BU_MCP_ALLOWED_DOMAINS ({", ".join(self._allowed_domains)}). Refusing to run '
-					f'any of it: macro steps execute directly and would bypass the per-action gate.'
+					f'any of it: macro steps execute directly and would bypass the per-action gate. '
+					f'Note that this check runs on the values this call would actually use, so '
+					f'overriding a variable such as `start_url` does not get around it.'
 				)
 
 	@staticmethod
@@ -2594,7 +2734,9 @@ class BuMcpServer:
 
 		session, _ = await self._ensure_session()
 		await self._check_domain_gate('macro_run')
-		self._macro_domain_gate(macro)
+		# Гейт считает те же значения переменных, что и сам прогон: проверять файл,
+		# а исполнять подставленное — это и есть обход allowlist через vars.
+		self._macro_domain_gate(macro, self._macro_values(macro, variables))
 
 		try:
 			out = await macro_mod.run(session, macro, vars=variables, strict=strict)
