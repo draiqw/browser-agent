@@ -340,14 +340,33 @@ _TREE_INDEX = re.compile(r'\[(\d+)\]<')
 _JSON_INDEX = re.compile(r'"index"\s*:\s*(\d+)')
 
 
+def split_header_and_tree(text: str) -> tuple[dict[str, Any] | None, str]:
+	"""bu_mcp answers browser_state with TWO text blocks, which this client joins
+	with a newline: a one-line JSON header, then the raw element tree.
+
+	The tree stopped being a JSON string field on purpose -- inside one it had to
+	escape every newline and tab, and the model paid two characters for each.
+	So `json.loads(whole_text)` no longer parses; the header is only the first line.
+	"""
+	head, _, rest = text.partition('\n')
+	try:
+		payload = json.loads(head)
+	except Exception:  # noqa: BLE001
+		return None, ''
+	return (payload, rest) if isinstance(payload, dict) else (None, '')
+
+
 def parse_state(server_key: str, text: str) -> dict[str, Any]:
 	"""-> {chars, elements, url, title, indices, tree, waiting}"""
 	out: dict[str, Any] = {'chars': len(text), 'elements': 0, 'url': None, 'title': None, 'indices': []}
 	payload: Any = None
+	split_tree = ''
 	try:
 		payload = json.loads(text)
 	except Exception:  # noqa: BLE001
-		payload = None
+		payload, split_tree = split_header_and_tree(text)
+	if isinstance(payload, dict) and split_tree and not payload.get('tree'):
+		payload = {**payload, 'tree': split_tree}
 
 	indices: set[int] = set()
 	if isinstance(payload, dict):
@@ -865,23 +884,24 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 def compose(server_key: str, text: str) -> dict[str, Any]:
 	"""Where the characters actually go, so "ours is bigger here" has a cause attached."""
 	out: dict[str, Any] = {'total': len(text)}
+	block_tree = ''
 	try:
 		payload = json.loads(text)
 	except Exception:  # noqa: BLE001
-		return out
+		payload, block_tree = split_header_and_tree(text)
 	if not isinstance(payload, dict):
 		return out
 	if server_key == 'ours':
-		tree = payload.get('tree') or ''
+		tree = payload.get('tree') or block_tree
 		href_map = payload.get('href_map') or {}
-		# The tree is a *string field* inside pretty-printed JSON, so every newline
-		# and tab in it is re-encoded as a two-character escape before it reaches
-		# the model. That overhead is invisible in len(tree) and very visible in
-		# len(text), so split it out instead of burying it in "envelope".
-		in_payload = len(json.dumps(tree, ensure_ascii=False))
+		# The tree used to be a *string field* inside pretty-printed JSON, so every
+		# newline and tab in it was re-encoded as a two-character escape before it
+		# reached the model. Once it moved into its own content block that surcharge
+		# is zero by construction; the column stays so old and new runs line up.
+		in_payload = len(tree) if block_tree else len(json.dumps(tree, ensure_ascii=False))
 		hm = len(json.dumps(href_map, ensure_ascii=False))
 		out['tree_raw'] = len(tree)
-		out['json_escape'] = in_payload - len(tree) - 2
+		out['json_escape'] = 0 if block_tree else in_payload - len(tree) - 2
 		out['href_map'] = hm if href_map else 0
 		out['metadata'] = len(text) - in_payload - hm
 		out['indent_ws'] = sum(len(ln) - len(ln.lstrip('\t ')) for ln in tree.splitlines())

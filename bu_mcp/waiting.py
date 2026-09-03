@@ -37,7 +37,7 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['wait_for_page_ready', 'wait_after_navigation']
+__all__ = ['wait_for_page_ready', 'wait_after_navigation', 'navigation_baseline']
 
 
 # Капы отдельных стадий (секунды). Каждый ещё и урезается остатком общего бюджета.
@@ -522,7 +522,29 @@ async def wait_for_page_ready(session: Any, *, timeout: float = 8.0) -> dict:
     return _finish()
 
 
-async def wait_after_navigation(session: Any, *, timeout: float = 10.0) -> dict:
+async def navigation_baseline(session: Any) -> dict:
+    """Снимок «какой документ показан прямо сейчас», СНЯТЫЙ ДО действия.
+
+    Существует ровно ради одной гонки. ``wait_after_navigation`` опознаёт новый
+    документ по смене ``loaderId`` главного фрейма, а сравнивать может только с
+    тем, что видела раньше. Если baseline снимается уже ПОСЛЕ вызова навигации
+    (как делал ``browser_navigate``), то к этому моменту документ, как правило,
+    успел закоммититься и выдать ``load``: baseline берётся с нового документа,
+    смены не видно, стадия честно докладывает «no navigation detected» и
+    впустую опрашивает фрейм всё своё стартовое окно.
+
+    Вызывать перед действием, результат передавать в
+    ``wait_after_navigation(..., baseline=...)``. Ничего не бросает.
+
+    Returns:
+        ``{'target_id': str | None, 'loader_id': str | None, 'url': str}``
+    """
+    target_id = getattr(session, 'agent_focus_target_id', None)
+    loader_id, _ = await _main_frame_loader_id(session, target_id)
+    return {'target_id': target_id, 'loader_id': loader_id, 'url': await _current_url(session, target_id)}
+
+
+async def wait_after_navigation(session: Any, *, timeout: float = 10.0, baseline: dict | None = None) -> dict:
     """Дождаться завершения навигации, начавшейся от предыдущего действия (клика).
 
     В browser-use после клика навигация не ожидается вообще (см. модульный
@@ -541,6 +563,14 @@ async def wait_after_navigation(session: Any, *, timeout: float = 10.0) -> dict:
       * ``navigation_start`` — засекли ли вообще новую навигацию;
       * ``lifecycle_load``   — дождались ли ``load``/``networkIdle`` по новому loaderId.
 
+    Args:
+        baseline: результат ``navigation_baseline(session)``, снятый ДО действия.
+            Без него baseline снимается здесь же, то есть уже после действия — и
+            для навигации, инициированной прямо перед вызовом, это гонка, которую
+            мы почти всегда проигрываем (см. docstring ``navigation_baseline``).
+            Для ожидания после клика (навигация может начаться с задержкой или не
+            начаться вовсе) baseline не нужен и остаётся ``None``.
+
     Returns:
         ``{'ready': bool, 'stages': [...], 'elapsed': float, 'navigated': bool, 'url': str}``
         Если навигации не было — это не ошибка: ``ready: True``, ``navigated: False``.
@@ -551,8 +581,16 @@ async def wait_after_navigation(session: Any, *, timeout: float = 10.0) -> dict:
     navigated = False
 
     target_id = getattr(session, 'agent_focus_target_id', None)
-    before_loader, _ = await _main_frame_loader_id(session, target_id)
-    before_url = await _current_url(session, target_id)
+    if baseline is not None:
+        before_loader = baseline.get('loader_id')
+        before_url = baseline.get('url') or ''
+        # new_tab=True переносит фокус на другой таргет: старый loaderId к нему
+        # не относится вовсе, сравнивать нечего — это по определению новый документ.
+        new_target = baseline.get('target_id') != target_id
+    else:
+        before_loader, _ = await _main_frame_loader_id(session, target_id)
+        before_url = await _current_url(session, target_id)
+        new_target = False
 
     # Буфер lifecycle-событий: тот же, что читает _navigate_and_wait.
     lifecycle: Any = None
@@ -569,12 +607,23 @@ async def wait_after_navigation(session: Any, *, timeout: float = 10.0) -> dict:
     new_loader: str | None = None
     detail = 'no navigation detected'
     try:
+        # Случай A': фокус уехал на другую вкладку (navigate new_tab=True).
+        if new_target:
+            loader, _ = await _main_frame_loader_id(session, target_id)
+            if loader:
+                new_loader, navigated = loader, True
+                detail = f'new tab: loaderId {loader[:8]} on target {str(target_id)[:8]}'
+
         # Случай A: навигация уже успела закоммититься между действием и этим вызовом.
         # Тогда loaderId сменился ДО того, как мы сняли baseline, и сравнивать не с чем.
         # Признак: текущий документ мы уже отслеживаем (в буфере есть его события),
         # но 'load' по нему ещё не приходил — значит загрузка в полёте.
+        # С honest baseline этот случай невозможен (before_loader — это ПРЕДЫДУЩИЙ
+        # документ, а не текущий), поэтому эвристика включается только без него.
         if (
-            before_loader
+            baseline is None
+            and not new_loader
+            and before_loader
             and _lifecycle_has(lifecycle, before_loader)
             and not _lifecycle_has(lifecycle, before_loader, {'load', 'networkIdle'})
         ):

@@ -12,7 +12,8 @@ This module reuses that representation verbatim and adds:
 
 * ``href`` (not in ``DEFAULT_INCLUDE_ATTRIBUTES`` at all, so the compact tree
   would otherwise be less addressable than the flat JSON it replaces), with
-  Skyvern-style placeholdering of long URLs;
+  Skyvern-style placeholdering of long URLs -- but only for the URLs where the
+  indirection is measurably cheaper than printing the link inline;
 * Private Use Area glyphs (icon fonts) collapsed to ``[icon]``;
 * attribute-detected custom dropdowns rendered as ``<select>``;
 * explicit "what you are not seeing" markers -- page-level pages above/below
@@ -38,8 +39,19 @@ __all__ = ['serialize_state']
 # Tuning knobs
 # --------------------------------------------------------------------------- #
 
-#: Longer hrefs are replaced by ``{{_<sha256[:12]>}}`` and moved to ``href_map``.
-HREF_MAX_LEN = 150
+#: Length of one ``{{_<sha256[:12]>}}`` placeholder: ``{{_`` + 12 hex + ``}}``.
+_PLACEHOLDER_LEN = 17
+
+#: Cost of one ``href_map`` entry in the emitted payload *minus* the URL itself:
+#: the quoted placeholder, the ``":"``, the separator and whatever indentation
+#: the transport adds.  Measured against both shapes ``bu_mcp/server.py`` can
+#: emit -- pretty ``json.dumps(..., indent=2)`` costs 31, compact
+#: ``separators=(',', ':')`` costs 23 -- and deliberately set to the larger:
+#: an entry that pays for itself at 31 also pays for itself at 23, so the rule
+#: cannot flip into the net loss it exists to prevent when the envelope format
+#: changes underneath it.  The self-check re-derives both numbers from ``json``
+#: and fails if either exceeds this constant.
+_MAP_ENTRY_OVERHEAD = 31
 
 #: Must mirror ``DomService(viewport_threshold=1000)`` -- everything further than
 #: this from the viewport is dropped from the DOM tree before we ever see it.
@@ -97,12 +109,66 @@ _SELECTABLE_CLASS_HINTS = (
 
 
 def _href_placeholder(url: str) -> str:
-	"""``{{_<first 12 chars of sha256>}}`` -- stable, short, addressable."""
+	"""``{{_<first 12 chars of sha256>}}`` -- stable, short, addressable.
+
+	Hashed over the *resolved* URL, so ``/cart``, ``./cart`` and
+	``https://site/cart`` collapse onto one placeholder and one map entry.  That
+	sharing is the entire reason the indirection can ever pay off.
+	"""
 	return '{{_' + hashlib.sha256(url.encode('utf-8', 'surrogatepass')).hexdigest()[:12] + '}}'
 
 
+def _worth_placeholdering(url: str, raw_lengths: list[int]) -> bool:
+	"""Is moving ``url`` into ``href_map`` cheaper than printing it inline?
+
+	Indirection cannot compress: the full URL still has to be written down, just
+	somewhere else.  The only thing it can do is *share* one copy between several
+	occurrences.  So the whole decision is one inequality, in payload characters:
+
+	* inline  = sum of the hrefs as they appear on their element lines;
+	* mapped  = ``k`` placeholders in the tree, plus one ``href_map`` entry.
+
+	With ``k`` occurrences of an absolute URL of length ``L`` (and the href
+	written the same way on every line) the break-even is
+	``k*L > 17*k + L + 31``, i.e. ``L > (17k + 31) / (k - 1)``:
+
+	====  ==========================================
+	k     shortest URL for which the map is cheaper
+	====  ==========================================
+	1     never -- a unique URL is a pure loss
+	2     66
+	3     42
+	4     34
+	5     30
+	10    23
+	====  ==========================================
+
+	The old fixed ``HREF_MAX_LEN = 150`` threshold (inherited from Skyvern)
+	answered a different question than the one that matters: how long the URL is,
+	never how often it repeats.  On the bench corpus it fired on exactly one site
+	-- 28 links on amazon, every one of them unique -- and cost 1,862 characters
+	on a pinned DOM snapshot, 2,117 end to end through the MCP server (~10% of
+	that whole observation), while missing the repeated 132-char URLs on coursera
+	that do pay off.  Length alone cannot tell those two cases apart; ``k`` can.
+	"""
+	inline = sum(raw_lengths)
+	mapped = _PLACEHOLDER_LEN * len(raw_lengths) + len(url) + _MAP_ENTRY_OVERHEAD
+	return mapped < inline
+
+
 def collapse_pua(text: str) -> str:
-	"""Collapse runs of Private Use Area glyphs (icon fonts) into ``[icon]``."""
+	"""Collapse runs of Private Use Area glyphs (icon fonts) into ``[icon]``.
+
+	Unlike the href map this is a substitution, not an indirection: nothing is
+	kept twice, so it cannot be a net loss the way an unshared placeholder is.
+	Its worst case is a one-glyph run, which costs +5 characters -- but only +3
+	bytes on the wire, since every PUA code point is 3 bytes in the UTF-8 the
+	payload is serialized as, and 2 glyphs already break even in bytes.  On the
+	16-site bench corpus the substitution never fires at all (zero PUA runs), so
+	it is measured at exactly 0 characters there and left unconditional: the
+	bounded downside buys a legible token in place of a code point that renders
+	as nothing.
+	"""
 	if not text:
 		return text
 	return _PUA_RUN.sub('[icon]', text)
@@ -127,6 +193,14 @@ def looks_selectable(node: Any) -> bool:
 
 	Detection is attribute-only (role / aria-haspopup / widget class names), the
 	same signal Skyvern's serializer uses to normalize custom dropdowns.
+
+	This one never claims to save characters and cannot backfire the way the href
+	map did: rewriting ``<div ...>`` to ``<select ... was=div>`` costs a flat +11
+	characters per element whatever the tag is (``6 - len(tag)`` for the new tag
+	name plus ``5 + len(tag)`` for ``was=``), with no second copy of anything.
+	The bench corpus rewrites at most 5 elements on a page (google_flights: 55
+	characters, 0.8% of that observation), and what it buys is that the model can
+	tell a dropdown from a div and reach for ``select_dropdown``.  Kept.
 	"""
 	tag = (getattr(node, 'tag_name', '') or '').lower()
 	if tag in _NATIVE_SELECT_TAGS:
@@ -164,12 +238,50 @@ def _node_href(node: Any) -> str | None:
 # --------------------------------------------------------------------------- #
 
 
+def _line_href(m: re.Match[str], node: Any, base_url: str) -> tuple[str, str] | None:
+	"""The href this serialized line would gain, as ``(as written, resolved)``.
+
+	``None`` when the element has no usable href or when browser-use already put
+	one on the line itself.
+	"""
+	if ' href=' in f' {m.group("attrs").strip()} ':
+		return None
+	href = _node_href(node)
+	if not href:
+		return None
+	return href, (urljoin(base_url, href) if base_url else href)
+
+
+def _plan_hrefs(tree: str, selector_map: dict[int, Any], base_url: str) -> set[str]:
+	"""Absolute URLs that are cheaper behind a placeholder than written inline.
+
+	One pass to count how often each URL occurs, then ``_worth_placeholdering``
+	per URL.  The costs of distinct URLs are additive and the ``href_map`` entry
+	overhead is flat (31 characters each, no per-map constant), so deciding each
+	URL on its own is exactly the cheapest possible split, not a heuristic.
+	"""
+	occurrences: dict[str, list[int]] = {}
+	for line in tree.split('\n'):
+		m = _ELEMENT_LINE.match(line)
+		if not m:
+			continue
+		node = selector_map.get(int(m.group('index')))
+		if node is None:
+			continue
+		pair = _line_href(m, node, base_url)
+		if pair:
+			occurrences.setdefault(pair[1], []).append(len(pair[0]))
+	return {url for url, lengths in occurrences.items() if _worth_placeholdering(url, lengths)}
+
+
 def _rewrite_tree(tree: str, selector_map: dict[int, Any], base_url: str) -> tuple[str, dict[str, str]]:
 	"""Post-process ``llm_representation`` output.
 
-	Adds hrefs (placeholdered when long), retags dropdown-like elements as
-	``<select>`` and collapses icon glyphs.  Returns ``(tree, href_map)``.
+	Adds hrefs (placeholdered only where the map pays for itself), retags
+	dropdown-like elements as ``<select>`` and collapses icon glyphs.  Returns
+	``(tree, href_map)``.
 	"""
+	placeholdered = _plan_hrefs(tree, selector_map, base_url)
 	href_map: dict[str, str] = {}
 	out: list[str] = []
 
@@ -194,12 +306,13 @@ def _rewrite_tree(tree: str, selector_map: dict[int, Any], base_url: str) -> tup
 			extra.append(f'was={tag}')
 			tag = 'select'
 
-		# 1) href, with long URLs behind a placeholder
-		href = _node_href(node)
-		if href and ' href=' not in f' {attrs.strip()} ':
-			if len(href) > HREF_MAX_LEN:
-				placeholder = _href_placeholder(href)
-				href_map[placeholder] = urljoin(base_url, href) if base_url else href
+		# 1) href, behind a placeholder only when that is the cheaper of the two
+		pair = _line_href(m, node, base_url)
+		if pair:
+			href, absolute = pair
+			if absolute in placeholdered:
+				placeholder = _href_placeholder(absolute)
+				href_map[placeholder] = absolute
 				extra.append(f'href={placeholder}')
 			else:
 				extra.append(f'href={href}')
@@ -452,6 +565,7 @@ def _legacy_flat_state(state: Any) -> str:
 
 async def _selfcheck() -> int:
 	import asyncio
+	import json
 
 	from browser_use.browser import BrowserSession
 	from browser_use.browser.events import CloseTabEvent, NavigateToUrlEvent
@@ -518,10 +632,17 @@ async def _selfcheck() -> int:
 			if '\t' not in new['tree'] and '  ' not in new['tree']:
 				failures.append(f'{url}: tree has no indentation (not hierarchical)')
 			for placeholder, full in new['href_map'].items():
-				if placeholder not in new['tree']:
+				k = new['tree'].count(placeholder)
+				if not k:
 					failures.append(f'{url}: href_map placeholder {placeholder} not in tree')
-				if len(full) <= HREF_MAX_LEN and not full.startswith('http'):
+				if not full.startswith(('http', '/')):
 					failures.append(f'{url}: href_map value not a URL: {full}')
+				# Every entry must be cheaper than the links it replaced. The hrefs as
+				# written are never longer than the resolved URL, so k*len(full) is an
+				# upper bound on what inlining would have cost: if the map does not beat
+				# that, it definitely does not beat the real thing.
+				if _PLACEHOLDER_LEN * k + len(full) + _MAP_ENTRY_OVERHEAD >= k * len(full):
+					failures.append(f'{url}: href_map entry does not pay for itself (x{k}, {len(full)} chars): {full}')
 
 			# truncation behaviour: ask for half of what the page actually produces
 			cap = max(200, new_len // 2)
@@ -568,6 +689,24 @@ async def _selfcheck() -> int:
 	long_url = 'https://x.test/' + 'a' * 200
 	ph = _href_placeholder(long_url)
 	assert re.fullmatch(r'\{\{_[0-9a-f]{12}\}\}', ph), ph
+	assert len(ph) == _PLACEHOLDER_LEN, ph
+
+	# The cost model has to bound the serializer it is modelling, in both the
+	# pretty and the compact shape server.py can emit the envelope in.
+	_probe = 'https://x.test/probe'
+	_costs = {}
+	for _name, _kw in (('pretty', {'indent': 2}), ('compact', {'separators': (',', ':')})):
+		_empty = len(json.dumps({'href_map': {}}, ensure_ascii=False, **_kw))
+		_one = len(json.dumps({'href_map': {_href_placeholder(_probe): _probe}}, ensure_ascii=False, **_kw))
+		_costs[_name] = _one - _empty - len(_probe)
+		assert _costs[_name] <= _MAP_ENTRY_OVERHEAD, (_name, _costs[_name])
+	assert _costs['pretty'] == _MAP_ENTRY_OVERHEAD, _costs
+
+	# Break-even, straight off the inequality in _worth_placeholdering.
+	assert not _worth_placeholdering(long_url, [len(long_url)]), 'unique URL must stay inline'
+	assert _worth_placeholdering('h' * 66, [66, 66]), 'x2 at 66 chars must be mapped'
+	assert not _worth_placeholdering('h' * 65, [65, 65]), 'x2 at 65 chars must stay inline'
+	assert _worth_placeholdering('h' * 42, [42] * 3) and not _worth_placeholdering('h' * 41, [41] * 3)
 
 	class _FakeNode:
 		def __init__(self, tag, attrs):
@@ -581,20 +720,36 @@ async def _selfcheck() -> int:
 	assert not looks_selectable(_FakeNode('div', {'class': 'container'}))
 	assert not looks_selectable(_FakeNode('select', {'role': 'combobox'}))
 	# End-to-end check of the rewrite pass on a synthetic serializer line.
+	repeated = 'https://x.test/' + 'b' * 90  # 105 chars, twice -> above the k=2 break-even
+	ph_rep = _href_placeholder(repeated)
 	fake_map = {
 		7: _FakeNode('a', {'href': long_url}),
 		8: _FakeNode('div', {'role': 'combobox', 'aria-expanded': 'false'}),
 		9: _FakeNode('a', {'href': '/short'}),
+		10: _FakeNode('a', {'href': repeated}),
+		11: _FakeNode('a', {'href': '/' + 'b' * 90}),  # same link, written relative
 	}
-	fake_tree = '\t*[7]<a aria-label=Docs />\n\t|scroll element[8]<div aria-expanded=false /> (0.0 pages above, 1.0 pages below)\n\t\t[9]<a />'
+	fake_tree = (
+		'\t*[7]<a aria-label=Docs />\n'
+		'\t|scroll element[8]<div aria-expanded=false /> (0.0 pages above, 1.0 pages below)\n'
+		'\t\t[9]<a />\n'
+		'\t\t[10]<a />\n'
+		'\t\t[11]<a />'
+	)
 	rewritten, fmap = _rewrite_tree(fake_tree, fake_map, 'https://x.test/page')
-	assert ph in rewritten and fmap[ph] == long_url, rewritten
 	assert '[8]<select' in rewritten and 'was=div' in rewritten, rewritten
 	assert '(0.0 pages above, 1.0 pages below)' in rewritten, rewritten
 	assert '|scroll element[8]' in rewritten and '*[7]' in rewritten, rewritten
 	assert 'href=/short' in rewritten, rewritten
-	assert long_url not in rewritten, 'long href leaked into tree'
-	print('unit checks: ok (pua collapse, href placeholder, selectable detection, tree rewrite)')
+	# A unique URL is never worth a map entry, however long it is: the map would
+	# hold a second full copy of it and the tree would still pay 17 for the stub.
+	assert ph not in rewritten and ph not in fmap, 'unique long href was placeholdered'
+	assert f'href={long_url}' in rewritten, rewritten
+	# A repeated one is, and both spellings of it share a single entry.
+	assert rewritten.count(f'href={ph_rep}') == 2, rewritten
+	assert fmap == {ph_rep: repeated}, fmap
+	assert repeated not in rewritten.replace(ph_rep, ''), 'repeated href leaked into tree'
+	print('unit checks: ok (pua collapse, href break-even, selectable detection, tree rewrite)')
 
 	if failures:
 		print('\nSELF-CHECK FAILED:')

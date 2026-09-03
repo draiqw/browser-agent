@@ -13,12 +13,14 @@ if/elif-дispatcher'ом. Наружу из браузерных примити�
 сервер поверх него) в этих местах ведёт себя плохо:
 
 * ``browser_state``      — ``bu_mcp.state.serialize_state``: компактное текстовое
-  дерево вместо плоского JSON, и БЕЗ скриншота. Штатный
+  дерево вместо плоского JSON, ОТДЕЛЬНЫМ текстовым блоком (внутри JSON-строки
+  каждый перевод строки и таб стоили бы по два символа), и БЕЗ скриншота. Штатный
   ``browser_get_state(include_screenshot=False)`` всё равно зовёт
   ``get_browser_state_summary()`` с дефолтным ``include_screenshot=True``,
   снимает кадр и выбрасывает его. Мы эту трату не воспроизводим.
-* ``browser_navigate``   — навигация + ``wait_after_navigation``: реестровый
-  ``navigate`` возвращает управление до того, как документ доехал.
+* ``browser_navigate``   — навигация + ``wait_after_navigation`` с baseline,
+  снятым ДО действия, + явная стадия гидрации: реестровый ``navigate``
+  возвращает управление до того, как документ дорисовался.
 * ``browser_click`` / ``browser_type`` — индекс резолвится через
   ``bu_mcp.resolve.resolve_index``; протухший или неоднозначный хендл прилетает
   клиенту ЖЁСТКОЙ ошибкой MCP (``isError=True``), а не мягким «page may have
@@ -40,6 +42,7 @@ if/elif-дispatcher'ом. Наружу из браузерных примити�
 ``BU_MCP_CDP_URL``            CDP живого Chrome, по умолчанию http://127.0.0.1:9222
 ``BU_MCP_ALLOWED_DOMAINS``    allowlist доменов через запятую, пустая = без ограничений
 ``BU_MCP_STATE_MAX_CHARS``    дефолтный бюджет дерева для browser_state (40000)
+``BU_MCP_HYDRATE_TIMEOUT``    дефолтный бюджет стадии гидрации в browser_navigate (3.0)
 """
 
 from __future__ import annotations
@@ -115,6 +118,11 @@ DOMAIN_EXEMPT = frozenset({'wait', 'switch', 'close'})
 DEFAULT_STATE_MAX_CHARS = int(os.getenv('BU_MCP_STATE_MAX_CHARS', '40000'))
 DEFAULT_SCREENSHOT_MAX_DIM = 1024
 
+#: Бюджет стадии гидрации в browser_navigate (см. BuMcpServer._hydrate).
+#: 3 с — с запасом к тем ~2.5 с, которые страница раньше получала случайно, но
+#: тратятся они теперь только если странице есть что догружать.
+DEFAULT_HYDRATE_TIMEOUT = float(os.getenv('BU_MCP_HYDRATE_TIMEOUT', '3.0'))
+
 
 class ToolError(Exception):
 	"""Ошибка инструмента, которая должна дойти до клиента как ``isError=True``.
@@ -168,7 +176,17 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 		'properties': {
 			'url': {'type': 'string', 'description': 'URL to open.'},
 			'new_tab': {'type': 'boolean', 'default': False, 'description': 'Open in a new tab instead of the current one.'},
-			'timeout': {'type': 'number', 'default': 10.0, 'description': 'Seconds to wait for the navigation to settle.'},
+			'timeout': {'type': 'number', 'default': 10.0, 'description': 'Seconds to wait for the new document to commit and fire load.'},
+			'hydrate': {
+				'type': 'number',
+				'default': DEFAULT_HYDRATE_TIMEOUT,
+				'minimum': 0,
+				'description': (
+					'Extra seconds, after load, to let a JavaScript app render itself. Returns as soon as the '
+					'page goes quiet, so a static page does not pay the full budget. 0 disables it: you get the '
+					'document as it was at load, which on a hydrated app can be an empty shell.'
+				),
+			},
 		},
 		'required': ['url'],
 	},
@@ -207,13 +225,15 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 
 _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 	'browser_state': (
-		'Current page as a compact text tree: url, title, tabs, viewport, scroll and every '
-		'interactive element with its index. Indices from here are what browser_click / '
+		'Current page in two text blocks: a one-line JSON header (url, title, element count, '
+		'viewport, scroll, tabs, href_map) and then the element tree as plain text, one line per '
+		'element, with the index in [brackets]. Indices from here are what browser_click / '
 		'browser_type / find_elements consume. No screenshot is taken, so this is cheap.'
 	),
 	'browser_navigate': (
-		'Open a URL and wait until the new document actually finishes loading. '
-		'Returns the per-stage waiting breakdown, so you can tell a settled page from a timeout.'
+		'Open a URL and wait until the new document actually commits and loads, then optionally '
+		'let it hydrate. Returns the per-stage waiting breakdown, so you can tell a settled page '
+		'from a timeout.'
 	),
 	'browser_click': (
 		'Click the element with this index from browser_state. The index is re-resolved against '
@@ -422,10 +442,22 @@ class BuMcpServer:
 	# -- форматирование ----------------------------------------------------- #
 
 	@staticmethod
-	def _text(payload: Any) -> list[types.TextContent]:
+	def _json(payload: Any, *, compact: bool = False) -> str:
+		"""JSON для клиента. ``compact`` — без отступов и без пробелов после запятых.
+
+		Отступы в JSON-ответе инструмента — это чистый налог: клиент их парсит, а
+		модель платит за них токенами. Читаемости они добавляют ровно там, где её
+		и так хватает (наши конверты — плоские объекты в десяток ключей).
+		"""
+		if compact:
+			return json.dumps(payload, separators=(',', ':'), ensure_ascii=False, default=str)
+		return json.dumps(payload, indent=2, ensure_ascii=False, default=str)
+
+	@classmethod
+	def _text(cls, payload: Any, *, compact: bool = False) -> list[types.TextContent]:
 		if isinstance(payload, str):
 			return [types.TextContent(type='text', text=payload)]
-		return [types.TextContent(type='text', text=json.dumps(payload, indent=2, ensure_ascii=False, default=str))]
+		return [types.TextContent(type='text', text=cls._json(payload, compact=compact))]
 
 	@staticmethod
 	def _action_result_text(name: str, result: Any) -> str:
@@ -473,7 +505,80 @@ class BuMcpServer:
 		# перестраивать DOM через get_browser_state_summary().
 		if state.get('viewport'):
 			self._last_viewport = {**state['viewport'], 'url': state.get('url')}
-		return self._text(state)
+		# Два блока, а не один JSON: см. _state_header.
+		return [
+			types.TextContent(type='text', text=self._json(self._state_header(state), compact=True)),
+			types.TextContent(type='text', text=state.get('tree') or '[empty page]'),
+		]
+
+	@staticmethod
+	def _state_header(state: dict[str, Any]) -> dict[str, Any]:
+		"""Конверт состояния: всё, кроме самого дерева.
+
+		Дерево уезжает ОТДЕЛЬНЫМ текстовым блоком MCP-ответа, а не полем внутри
+		JSON. Строковое поле JSON обязано экранировать каждый перевод строки и
+		каждый таб — а дерево из них состоит: на coursera это 1031 символ, за
+		которые модель платит и не получает ничего. Отдельный блок стоит ноль.
+
+		Конверт ужат до того, что клиенту действительно нужно на КАЖДОМ вызове.
+		Убрано (и почему):
+
+		* ``scroll.pixels_above/below``, ``pages_above/below`` и
+		  ``elements.hidden_above/below`` — дословный дубль того, что дерево уже
+		  печатает в своих маркерах ``[Start of page]`` / ``... (N more elements
+		  below - scroll to reveal)``. Одно и то же число дважды в одном ответе.
+		* ``elements.visibility_threshold_px`` — константа сборки (1000), она не
+		  меняется от вызова к вызову и от страницы не зависит.
+		* ``page``, когда он совпадает с вьюпортом — то есть когда страница не
+		  прокручивается и говорить не о чем.
+		* заголовки чужих вкладок — url их опознаёт, а название дублирует его же
+		  словами; заголовок текущей вкладки остаётся на верхнем уровне.
+		* полные 32-символьные ``target_id`` -> ``tab_id`` из последних 4
+		  символов. Это не усечение ради байтов: ровно эти 4 символа принимают
+		  ``switch``/``close`` (``browser_use/tools/service.py:1005``), так что
+		  клиенту теперь не нужно догадываться, что от id надо взять хвост.
+
+		Осталось ровно то, что нельзя восстановить из дерева: где мы (url,
+		title), сколько всего индексов (elements), геометрия окна, позиция
+		скролла, флаг усечения, список вкладок и href_map для плейсхолдеров.
+		"""
+
+		def dims(box: Any) -> str | None:
+			if not isinstance(box, dict):
+				return None
+			w, h = box.get('width'), box.get('height')
+			return f'{w}x{h}' if w is not None and h is not None else None
+
+		scroll = state.get('scroll') or {}
+		viewport = dims(state.get('viewport'))
+		page = dims(state.get('page'))
+
+		tabs: list[dict[str, Any]] = []
+		for tab in state.get('tabs') or []:
+			url = str(tab.get('url') or '')
+			entry: dict[str, Any] = {
+				'tab_id': str(tab.get('target_id') or '')[-4:],
+				'url': url if len(url) <= 120 else url[:119] + '…',
+			}
+			if tab.get('current'):
+				entry['current'] = True
+			tabs.append(entry)
+
+		header: dict[str, Any] = {
+			'url': state.get('url'),
+			'title': state.get('title'),
+			'elements': (state.get('elements') or {}).get('interactive'),
+			'viewport': viewport,
+			'scroll': f'{scroll.get("x", 0)},{scroll.get("y", 0)}',
+			'truncated': bool(state.get('truncated')),
+			'tabs': tabs,
+		}
+		if page and page != viewport:
+			header['page'] = page
+		# Последним: на плотных страницах карта длиннее всего остального вместе взятого.
+		if state.get('href_map'):
+			header['href_map'] = state['href_map']
+		return header
 
 	# --- browser_navigate -------------------------------------------------- #
 
@@ -482,6 +587,15 @@ class BuMcpServer:
 		session, tools = await self._ensure_session()
 		url = args['url']
 		await self._check_domain_gate('navigate', target_url=url)
+
+		# Baseline СНИМАЕТСЯ ДО ДЕЙСТВИЯ. Наоборот было нельзя: реестровый
+		# `navigate` возвращает управление уже после того, как документ
+		# закоммитился и, как правило, выдал `load`, поэтому baseline снимался с
+		# НОВОГО документа, разницы loaderId не оставалось и стадия
+		# `navigation_start` честно докладывала «no navigation detected», а потом
+		# впустую опрашивала фрейм всё стартовое окно (2.5 с при timeout=10).
+		# Замерено: 45 из 48 навигаций в BENCH.md.
+		baseline = await waiting_mod.navigation_baseline(session)
 
 		try:
 			result = await tools.registry.execute_action(
@@ -494,14 +608,56 @@ class BuMcpServer:
 			raise ToolError(f'navigate to {url!r} failed: {type(exc).__name__}: {exc}') from exc
 
 		action_text = self._action_result_text('navigate', result)
-		waiting = await waiting_mod.wait_after_navigation(session, timeout=float(args.get('timeout') or 10.0))
+		waiting = await waiting_mod.wait_after_navigation(
+			session, timeout=float(args.get('timeout') or 10.0), baseline=baseline
+		)
+		await self._hydrate(waiting, args.get('hydrate'))
 		return self._text(
 			{
 				'action': action_text,
 				'url': await self._current_url(),
 				'waiting': waiting,
-			}
+			},
+			compact=True,
 		)
+
+	async def _hydrate(self, waiting: dict[str, Any], requested: Any) -> None:
+		"""Явная стадия «дать странице догрузиться» поверх завершённой навигации.
+
+		Зачем она вообще есть. До починки baseline (см. выше) `browser_navigate`
+		возвращал управление на ~2.5 с позже штатного сервера — и эти секунды не
+		были ожиданием, это был опрос вхолостую. Но побочный эффект был
+		полезным: за них SPA успевала гидрироваться, и состояние отдавало
+		заметно больше элементов (google_maps 47 против 8, coursera 172 против
+		36 у штатного сервера). Чинить гонку, не заменив побочку, значило бы
+		обменять реальные элементы на секунду латентности.
+
+		Поэтому дожидание оставлено, но перестало быть побочкой:
+
+		* у него своё имя (стадии в разбивке помечены `hydration.`),
+		* свой бюджет (`hydrate`, по умолчанию 3 с, `0` выключает),
+		* и, в отличие от `sleep(2.5)`, оно измеряет страницу, а не часы:
+		  лестница `wait_for_page_ready` (спиннеры -> сетевая тишина ->
+		  MutationObserver) выходит раньше, когда странице нечего догружать.
+		  Пустая статическая страница стоит теперь ~0.5 с вместо 2.5 с, а
+		  живая SPA получает свои секунды и, главное, отчитывается,
+		  дождались её или бюджет кончился.
+
+		`ready` остаётся конъюнкцией всех стадий: теперь он означает
+		«документ доехал И перестал шевелиться», а не «ждать было нечего».
+		"""
+		budget = DEFAULT_HYDRATE_TIMEOUT if requested is None else float(requested)
+		if budget <= 0:
+			waiting['hydrated'] = None
+			return
+		waiting_mod = _bu_mcp('waiting')
+		session, _ = await self._ensure_session()
+		settle = await waiting_mod.wait_for_page_ready(session, timeout=budget)
+		for stage in settle.get('stages', []):
+			waiting.setdefault('stages', []).append({**stage, 'name': f'hydration.{stage["name"]}'})
+		waiting['hydrated'] = bool(settle.get('ready'))
+		waiting['ready'] = bool(waiting.get('ready')) and waiting['hydrated']
+		waiting['elapsed'] = round(float(waiting.get('elapsed') or 0.0) + float(settle.get('elapsed') or 0.0), 3)
 
 	# --- резолв индекса ---------------------------------------------------- #
 
@@ -557,7 +713,9 @@ class BuMcpServer:
 
 		action_text = self._action_result_text('click', result)
 		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
-		return self._text({'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting})
+		return self._text(
+			{'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting}, compact=True
+		)
 
 	# --- browser_type ------------------------------------------------------ #
 
@@ -579,7 +737,9 @@ class BuMcpServer:
 
 		action_text = self._action_result_text('input', result)
 		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
-		return self._text({'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting})
+		return self._text(
+			{'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting}, compact=True
+		)
 
 	# --- browser_screenshot ------------------------------------------------ #
 
@@ -609,7 +769,7 @@ class BuMcpServer:
 			meta['viewport_source'] = 'unknown (call browser_state first; not fetched to avoid a DOM rebuild)'
 
 		return [
-			types.TextContent(type='text', text=json.dumps(meta, indent=2, default=str)),
+			types.TextContent(type='text', text=self._json(meta, compact=True)),
 			types.ImageContent(type='image', data=base64.b64encode(data).decode(), mimeType='image/png'),
 		]
 

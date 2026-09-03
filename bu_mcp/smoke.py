@@ -48,6 +48,20 @@ def images_of(result) -> list:
 	return [c for c in result.content if getattr(c, 'type', None) == 'image']
 
 
+def state_of(result) -> dict:
+	"""Разобрать ответ browser_state: JSON-шапка первым блоком, дерево — вторым.
+
+	Дерево едет отдельным текстовым блоком именно для того, чтобы его переводы
+	строк не экранировались внутри JSON-строки. Для остальных проверок оно
+	кладётся обратно под ключ `tree`, чтобы они остались дословно теми же.
+	"""
+	blocks = [c.text for c in result.content if getattr(c, 'type', None) == 'text']
+	head = json.loads(blocks[0]) if blocks else {}
+	if len(blocks) > 1:
+		head['tree'] = blocks[1]
+	return head
+
+
 async def main() -> int:
 	params = StdioServerParameters(
 		command=sys.executable,
@@ -121,8 +135,8 @@ async def main() -> int:
 			if res.isError:
 				bad('browser_state', text_of(res))
 				return report()
-			state = json.loads(text_of(res))
-			print(f'  title={state.get("title")!r} interactive={state.get("elements", {}).get("interactive")} '
+			state = state_of(res)
+			print(f'  title={state.get("title")!r} interactive={state.get("elements")} '
 				  f'tree_len={len(state.get("tree", ""))} truncated={state.get("truncated")}')
 			for key in ('url', 'title', 'tabs', 'viewport', 'scroll', 'tree', 'truncated'):
 				if key in state:
@@ -137,7 +151,7 @@ async def main() -> int:
 			my_tab_id = None
 			for tab in state.get('tabs', []):
 				if tab.get('current'):
-					my_tab_id = tab.get('target_id')
+					my_tab_id = tab.get('tab_id')
 			print(f'  tabs={len(state.get("tabs", []))} current_target={my_tab_id}')
 
 			# --- 4. find_elements ------------------------------------------ #
@@ -223,7 +237,7 @@ async def main() -> int:
 			res = await session.call_tool('browser_state', {})
 			probe_index = None
 			if not res.isError:
-				for line in json.loads(text_of(res)).get('tree', '').splitlines():
+				for line in state_of(res).get('tree', '').splitlines():
 					if 'buMcpProbe' in line or 'bu mcp probe' in line:
 						m = INDEX_RE.search(line)
 						if m:
@@ -248,14 +262,14 @@ async def main() -> int:
 			# --- 8. закрываем свою вкладку --------------------------------- #
 			print('\n[8] cleanup: close our own tab')
 			res = await session.call_tool('browser_state', {})
-			tabs = json.loads(text_of(res)).get('tabs', []) if not res.isError else []
+			tabs = state_of(res).get('tabs', []) if not res.isError else []
 			target = None
 			for tab in tabs:
 				if tab.get('current'):
-					target = tab.get('target_id')
+					target = tab.get('tab_id')
 			print(f'  our tab: {target} ({[t.get("url") for t in tabs if t.get("current")]})')
 			if target:
-				res = await session.call_tool('close', {'tab_id': str(target)[-4:]})
+				res = await session.call_tool('close', {'tab_id': str(target)})
 				print(f'  close -> isError={res.isError}: {text_of(res)[:200]}')
 				if not res.isError:
 					ok('our tab closed')
@@ -298,9 +312,9 @@ async def allowlist_check() -> None:
 			# закрываем свою вкладку
 			st = await session.call_tool('browser_state', {})
 			if not st.isError:
-				for tab in json.loads(text_of(st)).get('tabs', []):
-					if tab.get('current') and tab.get('target_id'):
-						cl = await session.call_tool('close', {'tab_id': str(tab['target_id'])[-4:]})
+				for tab in state_of(st).get('tabs', []):
+					if tab.get('current') and tab.get('tab_id'):
+						cl = await session.call_tool('close', {'tab_id': str(tab['tab_id'])})
 						print(f'  cleanup close -> {text_of(cl)[:100]}')
 						if not cl.isError:
 							ok('allowlist run cleaned up its tab')
