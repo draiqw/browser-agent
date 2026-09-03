@@ -48,6 +48,15 @@ def images_of(result) -> list:
 	return [c for c in result.content if getattr(c, 'type', None) == 'image']
 
 
+def as_json(body: str) -> dict:
+	"""Ответ инструмента как dict; не JSON — пустой dict (значит, проверка не сошлась)."""
+	try:
+		out = json.loads(body)
+	except Exception:  # noqa: BLE001
+		return {}
+	return out if isinstance(out, dict) else {}
+
+
 def state_of(result) -> dict:
 	"""Разобрать ответ browser_state: JSON-шапка первым блоком, дерево — вторым.
 
@@ -63,6 +72,7 @@ def state_of(result) -> dict:
 
 
 async def main() -> int:
+	contract_checks()
 	params = StdioServerParameters(
 		command=sys.executable,
 		args=['-m', 'bu_mcp.server'],
@@ -278,8 +288,348 @@ async def main() -> int:
 			else:
 				bad('our tab closed', 'could not identify the current tab')
 
+			# --- 10. ложные успехи ----------------------------------------- #
+			await false_success_checks(session)
+
 	await allowlist_check()
 	return report()
+
+
+# --------------------------------------------------------------------------- #
+# [10] Ложные успехи: контракт ActionResult, скролл фактом, вкладки фактом
+# --------------------------------------------------------------------------- #
+
+#: Дословные строки browser-use, которые уезжали клиенту как успех.
+#: Здесь они лежат КОПИЕЙ апстрима, а не ссылкой на константу сервера: если в
+#: browser-use текст переформулируют, а в NOOP_MARKERS забудут — тест упадёт.
+UPSTREAM_NOOP_SAMPLES = [
+	# browser_use/tools/service.py: _click_by_index / input / dropdown_options / select_dropdown
+	('click', 'Element index 42 not available - page may have changed. Try refreshing browser state.', 'stale-index'),
+	('input', 'Element index 7 not available - page may have changed. Try refreshing browser state.', 'stale-index'),
+	('dropdown_options', 'Element index 7 not available - page may have changed. Try refreshing browser state.', 'stale-index'),
+	('select_dropdown', 'Element index 7 not available - page may have changed. Try refreshing browser state.', 'stale-index'),
+	# browser_use/tools/service.py: find_text (один except на «нет текста» и «нет CDP»)
+	('find_text', "Text 'quarterly report' not found or not visible on page", 'text-not-found'),
+	# default_action_watchdog.on_GetDropdownOptionsEvent -> service.dropdown_options
+	('dropdown_options', 'No options found in dropdown at index 12', 'no-dropdown-options'),
+	('dropdown_options', 'No options found in ARIA combobox at index 12 (listbox: lb1)', 'no-dropdown-options'),
+	# default_action_watchdog.on_SelectDropdownOptionEvent -> service.select_dropdown
+	(
+		'select_dropdown',
+		"Available dropdown options  are:\n- alpha\n- beta\nCouldn't select the dropdown option as 'gamma' is not one of the available options.",
+		'option-not-available',
+	),
+	# browser_use/tools/service.py: switch, except Exception
+	('switch', 'Attempted to switch to tab #AB12', 'switch-attempted'),
+]
+
+#: Дословный хвост, который _detect_new_tab_opened приклеивает к результату клика.
+UPSTREAM_NEW_TAB_CLAIM = 'Clicked button with text "Open"' + '. Automatically switched to new tab (tab_id: BEEF).'
+
+
+def contract_checks() -> None:
+	"""Чистые проверки: строки апстрима -> классификация, снимки -> вердикт.
+
+	Живой браузер тут не нужен и не нужен нарочно: гонку «узел умер между
+	резолвом и действием» и «SwitchTabEvent вернул None» в браузере
+	воспроизводимо не поставить, а разобрать дословный ответ апстрима — можно.
+	"""
+	print('\n[10] contract: ActionResult / new-tab / scroll (pure)')
+	try:
+		from bu_mcp.server import BuMcpServer, ToolError
+	except Exception as exc:  # noqa: BLE001
+		bad('bu_mcp.server imports for contract checks', f'{type(exc).__name__}: {exc}')
+		return
+
+	# -- таблица текстов-нооп ------------------------------------------------
+	missed = []
+	for name, text, code in UPSTREAM_NOOP_SAMPLES:
+		marker = getattr(BuMcpServer, '_classify_noop', None)
+		hit = marker(name, text) if marker else None
+		if hit is None or hit.code != code:
+			missed.append(f'{name}: {text[:48]!r} -> {getattr(hit, "code", None)} (want {code})')
+	if missed:
+		bad('every known no-op text is classified', '; '.join(missed))
+	else:
+		ok('every known no-op text is classified', f'{len(UPSTREAM_NOOP_SAMPLES)} samples')
+
+	# Гейт по имени действия: та же строка в выдаче search_page — это просто
+	# текст со страницы, а не провал действия.
+	if getattr(BuMcpServer, '_classify_noop', None) and BuMcpServer._classify_noop(
+		'search_page', 'Element index 42 not available - page may have changed. Try refreshing browser state.'
+	) is None:
+		ok('no-op check is gated by action name (search_page output is not flagged)')
+	else:
+		bad('no-op check is gated by action name')
+
+	# -- #5529: рапорт о новой вкладке --------------------------------------
+	reconcile = getattr(BuMcpServer, '_reconcile_new_tab', None)
+	if reconcile is None:
+		bad('new-tab claim is reconciled against the real focus', '_reconcile_new_tab is missing')
+	else:
+		# Переключение ПРОВАЛИЛОСЬ: вкладка открылась, фокус не двинулся.
+		text, info = reconcile(
+			UPSTREAM_NEW_TAB_CLAIM,
+			{'focus': 'AAAAAAAA1111', 'ids': ['AAAAAAAA1111']},
+			{'focus': 'AAAAAAAA1111', 'ids': ['AAAAAAAA1111', 'BBBBBBBBBEEF']},
+		)
+		if 'Automatically switched to new tab' in text:
+			bad('failed auto-switch is not reported as success', 'upstream claim passed through verbatim')
+		elif info.get('claim') == 'false' and 'WARNING' in text and '1111' in text:
+			ok('failed auto-switch is reported as a failed switch')
+		else:
+			bad('failed auto-switch is reported as a failed switch', f'{info} / {text[:160]}')
+
+		# Переключение УДАЛОСЬ: фокус реально на новой вкладке.
+		text, info = reconcile(
+			UPSTREAM_NEW_TAB_CLAIM,
+			{'focus': 'AAAAAAAA1111', 'ids': ['AAAAAAAA1111']},
+			{'focus': 'BBBBBBBBBEEF', 'ids': ['AAAAAAAA1111', 'BBBBBBBBBEEF']},
+		)
+		if info.get('claim') == 'verified' and 'verified' in text:
+			ok('successful auto-switch is confirmed by target_id')
+		else:
+			bad('successful auto-switch is confirmed by target_id', f'{info} / {text[:160]}')
+
+	# -- скролл: вердикт по цифрам ------------------------------------------
+	verdict = getattr(BuMcpServer, '_scroll_verdict', None)
+	if verdict is None:
+		bad('scroll is verified by scrollY', '_scroll_verdict is missing')
+		return
+
+	at_top = {'ok': True, 'page': {'y': 0, 'x': 0, 'max_y': 4795, 'max_x': 0, 'sig': 0, 'containers': 0}, 'target': None}
+	at_bottom = {
+		'ok': True,
+		'page': {'y': 4795, 'x': 0, 'max_y': 4795, 'max_x': 0, 'sig': 11, 'containers': 1},
+		'target': None,
+	}
+
+	# Ничего не сдвинулось, но запас прокрутки есть -> жёсткая ошибка.
+	try:
+		out = verdict({'down': True, 'pages': 1.0}, at_top, at_top, '🔍 Scrolled down 479px')
+		bad('blocked scroll is a hard error', f'came back as {out.get("status")}: {out.get("action")}')
+	except ToolError as exc:
+		if 'did NOT move' in str(exc) and '4795' in str(exc):
+			ok('blocked scroll is a hard error')
+		else:
+			bad('blocked scroll is a hard error', str(exc)[:160])
+
+	# Уже в конце страницы -> честный отдельный статус, НЕ ошибка.
+	try:
+		out = verdict({'down': True, 'pages': 1.0}, at_bottom, at_bottom, '🔍 Scrolled down 479px')
+	except ToolError as exc:
+		bad('already-at-bottom is an honest status, not an error', str(exc)[:160])
+	else:
+		if out.get('status') == 'at-end' and out.get('scrolled') is False and 'Nothing scrolled' in out['action']:
+			ok('already-at-bottom is an honest status, not an error')
+		else:
+			bad('already-at-bottom is an honest status, not an error', json.dumps(out)[:200])
+
+	# Реальная прокрутка -> успех с фактической дельтой.
+	out = verdict({'down': True, 'pages': 1.0}, at_top, at_bottom, '🔍 Scrolled down 479px')
+	if out.get('scrolled') is True and out.get('delta', {}).get('y') == 4795:
+		ok('real scroll reports the measured delta')
+	else:
+		bad('real scroll reports the measured delta', json.dumps(out)[:200])
+
+
+async def false_success_checks(session) -> None:
+	"""Живые проверки в собственной вкладке. Чужие вкладки не трогаем."""
+	print('\n[10b] false success: live checks in our own tab')
+	before_ids = {t['tab_id'] for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])}
+
+	res = await session.call_tool('browser_navigate', {'url': 'https://example.com', 'new_tab': True})
+	if res.isError:
+		bad('false-success run opened its own tab', text_of(res)[:160])
+		return
+	ours = {t['tab_id'] for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])} - before_ids
+
+	async def ev(code: str) -> str:
+		return text_of(await session.call_tool('evaluate', {'code': code}))
+
+	try:
+		# -- скролл -------------------------------------------------------- #
+		await ev(
+			"(function(){var d=document.createElement('div');d.id='buMcpTall';d.style.height='5000px';"
+			"d.textContent='tall';document.body.appendChild(d);return document.scrollingElement.scrollHeight})()"
+		)
+		res = await session.call_tool('scroll', {'down': True, 'pages': 1.0})
+		body = text_of(res)
+		print(f'\n  scroll down -> isError={res.isError} {body[:200]}')
+		if res.isError:
+			bad('scroll on a scrollable page succeeds', body[:200])
+		else:
+			payload = as_json(body)
+			if payload.get('scrolled') is True and payload.get('delta', {}).get('y', 0) > 0:
+				ok('scroll reports a measured delta', f'dy={payload["delta"]["y"]}')
+			else:
+				bad('scroll reports a measured delta', body[:200])
+
+		# уже внизу: скроллить некуда -> честный статус, не ошибка
+		await ev('(function(){document.scrollingElement.scrollTop=999999;return document.scrollingElement.scrollTop})()')
+		res = await session.call_tool('scroll', {'down': True, 'pages': 1.0})
+		body = text_of(res)
+		print(f'  scroll at bottom -> isError={res.isError} {body[:220]}')
+		if res.isError:
+			bad('scroll at the bottom is not an error', body[:200])
+		else:
+			payload = as_json(body)
+			if payload.get('status') == 'at-end' and payload.get('scrolled') is False:
+				ok('scroll at the bottom is an honest at-end status')
+			else:
+				bad('scroll at the bottom is an honest at-end status', body[:200])
+			claim = (payload.get('action') or body).strip()
+			if re.match(r'^(🔍\s*)?Scrolled down \d+px$', claim):
+				bad('at-end scroll does not claim it scrolled', claim)
+			else:
+				ok('at-end scroll does not claim it scrolled')
+
+		# прокрутка заблокирована, но запас есть -> жёсткая ошибка
+		await ev(
+			"(function(){document.scrollingElement.scrollTop=0;document.documentElement.style.overflow='hidden';"
+			'return [document.scrollingElement.scrollTop, document.scrollingElement.scrollHeight]})()'
+		)
+		res = await session.call_tool('scroll', {'down': True, 'pages': 1.0})
+		body = text_of(res)
+		print(f'  scroll blocked -> isError={res.isError} {body[:220]}')
+		if res.isError and 'did NOT move' in body:
+			ok('a scroll that moved nothing is a hard error')
+		else:
+			bad('a scroll that moved nothing is a hard error', body[:220])
+		await ev("(function(){document.documentElement.style.overflow='';document.scrollingElement.scrollTop=0;return 1})()")
+
+		# -- find_text ------------------------------------------------------ #
+		res = await session.call_tool('find_text', {'text': 'bu-mcp-no-such-text-zzz'})
+		body = text_of(res)
+		print(f'  find_text missing -> isError={res.isError} {body[:200]}')
+		if res.isError and 'text-not-found' in body:
+			ok('find_text on missing text is a hard error')
+		else:
+			bad('find_text on missing text is a hard error', body[:200])
+		if 'Liveness probe' in body:
+			ok('find_text separates "no such text" from "dead page"')
+		else:
+			bad('find_text separates "no such text" from "dead page"', body[:200])
+
+		# -- dropdown -------------------------------------------------------- #
+		for tool, args in (
+			('dropdown_options', {'index': 999999}),
+			('select_dropdown', {'index': 999999, 'text': 'whatever'}),
+		):
+			res = await session.call_tool(tool, args)
+			body = text_of(res)
+			print(f'  {tool} stale -> isError={res.isError} {body[:120]}')
+			if res.isError and 'stale-index' in body:
+				ok(f'{tool} on a dead index is a hard error')
+			else:
+				bad(f'{tool} on a dead index is a hard error', body[:200])
+
+		await ev(
+			"(function(){var s=document.createElement('select');s.id='buMcpSel';"
+			"s.setAttribute('aria-label','bu mcp select');['alpha','beta'].forEach(function(t){"
+			"var o=document.createElement('option');o.textContent=t;o.value=t;s.appendChild(o)});"
+			"document.body.prepend(s);return 'ok'})()"
+		)
+		sel_index = await index_of(session, 'id=buMcpSel')
+		if sel_index is None:
+			bad('probe <select> shows up in browser_state')
+		else:
+			res = await session.call_tool('select_dropdown', {'index': sel_index, 'text': 'no-such-option'})
+			body = text_of(res)
+			print(f'  select_dropdown bad option -> isError={res.isError} {body[:200]}')
+			if res.isError and 'option-not-available' in body:
+				ok('select_dropdown with an unavailable option is a hard error')
+			else:
+				bad('select_dropdown with an unavailable option is a hard error', body[:200])
+			res = await session.call_tool('select_dropdown', {'index': sel_index, 'text': 'beta'})
+			if not res.isError and 'beta' in text_of(res):
+				ok('select_dropdown with a real option still succeeds')
+			else:
+				bad('select_dropdown with a real option still succeeds', text_of(res)[:200])
+
+		# -- switch ---------------------------------------------------------- #
+		res = await session.call_tool('switch', {'tab_id': 'ZZZZ'})
+		body = text_of(res)
+		print(f'  switch to a bogus tab -> isError={res.isError} {body[:160]}')
+		if res.isError:
+			ok('switch to a nonexistent tab is a hard error')
+		else:
+			bad('switch to a nonexistent tab is a hard error', body[:200])
+
+		current = None
+		for tab in state_of(await session.call_tool('browser_state', {})).get('tabs', []):
+			if tab.get('current'):
+				current = tab['tab_id']
+		if current:
+			res = await session.call_tool('switch', {'tab_id': str(current)})
+			body = text_of(res)
+			if not res.isError and as_json(body).get('tab', {}).get('focus_after') == current:
+				ok('switch to a real tab is confirmed by target_id')
+			else:
+				bad('switch to a real tab is confirmed by target_id', body[:200])
+
+		# -- новая вкладка (#5529) ------------------------------------------- #
+		await ev(
+			"(function(){var a=document.createElement('a');a.id='buMcpBlank';"
+			"a.href='https://example.com/index.html';a.target='_blank';a.textContent='OPEN BLANK';"
+			"document.body.prepend(a);return 'ok'})()"
+		)
+		link_index = await index_of(session, 'id=buMcpBlank')
+		if link_index is None:
+			bad('probe target=_blank link shows up in browser_state')
+		else:
+			res = await session.call_tool('browser_click', {'index': link_index})
+			body = text_of(res)
+			print(f'  click target=_blank -> isError={res.isError} {body[:320]}')
+			if res.isError:
+				bad('click on a target=_blank link', body[:200])
+			else:
+				payload = as_json(body)
+				tab = payload.get('tab') or {}
+				action = payload.get('action') or ''
+				if tab.get('focus_before') and 'focus_after' in tab:
+					ok('click reports the real focus before/after', f'{tab.get("focus_before")} -> {tab.get("focus_after")}')
+				else:
+					bad('click reports the real focus before/after', body[:200])
+				if 'Automatically switched to new tab' in action:
+					bad('the unverified upstream tab claim never reaches the client', action[:200])
+				else:
+					ok('the unverified upstream tab claim never reaches the client')
+				claim = tab.get('claim')
+				if claim == 'verified' and (tab.get('focus_after') or '').lower() == (tab.get('claimed') or '').lower():
+					ok('new-tab report matches the actual focus', f'claim={claim}')
+				elif claim in ('false', 'mismatch') and 'WARNING' in action:
+					ok('new-tab report matches the actual focus', f'claim={claim} (switch really failed)')
+				elif claim in ('silent-open', 'upstream-note', 'none'):
+					ok('new-tab report matches the actual focus', f'claim={claim}')
+				else:
+					bad('new-tab report matches the actual focus', f'claim={claim}: {action[:200]}')
+	finally:
+		# -- уборка: закрываем ТОЛЬКО свои вкладки --------------------------- #
+		tabs = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
+		mine = [t for t in tabs if t['tab_id'] in ours or 'example.com' in (t.get('url') or '')]
+		closed = 0
+		for tab in mine:
+			cl = await session.call_tool('close', {'tab_id': str(tab['tab_id'])})
+			closed += 0 if cl.isError else 1
+		print(f'  cleanup: closed {closed}/{len(mine)} of our tabs')
+		if closed == len(mine) and mine:
+			ok('false-success run cleaned up its tabs', f'{closed}')
+		else:
+			bad('false-success run cleaned up its tabs', f'{closed}/{len(mine)}')
+
+
+async def index_of(session, needle: str) -> int | None:
+	"""Индекс элемента, в строке которого встречается ``needle``."""
+	res = await session.call_tool('browser_state', {})
+	if res.isError:
+		return None
+	for line in state_of(res).get('tree', '').splitlines():
+		if needle in line:
+			m = INDEX_RE.search(line)
+			if m:
+				return int(m.group(1))
+	return None
 
 
 async def allowlist_check() -> None:

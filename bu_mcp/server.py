@@ -30,6 +30,24 @@ if/elif-дispatcher'ом. Наружу из браузерных примити�
   ради них не вызывается — штатный сервер из-за этого перестраивает весь DOM и
   снимает второй кадр.
 
+Плюс два реестровых действия проходят через верификацию (схема у них остаётся
+реестровой, подменяется только доверие к их рапорту):
+
+* ``scroll``  — позиция прокрутки снимается ДО и ПОСЛЕ. У browser-use текстового
+  признака провала нет вовсе: цикл по страницам глотает исключения, а при
+  ``pages=1.0`` (дефолт!) строка «Scrolled down Npx» печатается независимо от
+  того, сдвинулось ли что-нибудь. Не сдвинулось при наличии запаса прокрутки —
+  ``ToolError``; не сдвинулось потому, что мы уже в конце — отдельный честный
+  статус ``at-end`` (см. ``_tool_scroll``).
+* ``switch``  — фактический ``agent_focus_target_id`` после переключения
+  сверяется с запрошенным ``tab_id``.
+
+И общее для ВСЕХ действий: ``_action_result_text`` проверяет ``ActionResult`` не
+только на ``error``, но и по таблице ``NOOP_MARKERS`` — шесть мест browser-use
+возвращают «ничего не сделано» обычным успешным результатом (issues #5361,
+#5438). Плюс рапорт об авто-переключении на новую вкладку (#5529) переписывается
+по фактическому target_id.
+
 Реестровые ``navigate``/``click``/``input``/``screenshot`` наружу не выпускаются:
 иначе клиент мог бы обойти резолв индексов и ожидания. Плюс исключены
 ``done`` (агентский), ``write_file``/``replace_file``/``read_file`` (файловая
@@ -61,9 +79,10 @@ import importlib
 import io
 import json
 import logging
+import re
 import tempfile
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 logging.basicConfig(stream=sys.stderr, level=logging.WARNING, force=True)
 
@@ -132,6 +151,198 @@ class ToolError(Exception):
 	протухших хендлов: клиент должен увидеть отказ, а не текст «всё нормально,
 	только страница, возможно, изменилась».
 	"""
+
+
+class NoopResultError(ToolError):
+	"""``ActionResult`` без ``error``, но с текстом «ничего не сделано».
+
+	Отдельный тип нужен, чтобы вызывающий мог дообогатить сообщение (например,
+	отличить «текста нет на странице» от «страница умерла») и при этом не ловить
+	все ToolError подряд.
+	"""
+
+	def __init__(self, message: str, *, code: str, raw: str) -> None:
+		super().__init__(message)
+		self.code = code
+		self.raw = raw
+
+
+# --------------------------------------------------------------------------- #
+# Контракт ActionResult: тексты-нооп
+# --------------------------------------------------------------------------- #
+
+
+class NoopMarker(NamedTuple):
+	"""Один известный текст-нооп из browser-use.
+
+	``pattern``  — по чему узнаём (сверяется с ``extracted_content`` и
+	               ``long_term_memory``, склеенными через ``\\n``);
+	``actions``  — имена действий реестра, к результатам которых применять.
+	               Гейт по имени обязателен: ``search_page`` / ``find_elements`` /
+	               ``evaluate`` возвращают в ``extracted_content`` куски САМОЙ
+	               страницы, и там любая из этих фраз может встретиться дословно;
+	``code``     — короткий код для ответа и тестов;
+	``source``   — где именно в browser-use текст рождается. ЭТО НАДО СВЕРЯТЬ
+	               ПРИ КАЖДОМ ОБНОВЛЕНИИ browser-use;
+	``hint``     — что клиенту делать дальше.
+	"""
+
+	pattern: re.Pattern[str]
+	actions: frozenset[str]
+	code: str
+	source: str
+	hint: str
+
+
+#: Тексты, которые browser-use кладёт в ``ActionResult.extracted_content`` /
+#: ``long_term_memory`` БЕЗ ``error``, хотя действие не выполнилось.
+#:
+#: Зачем таблица. ``_action_result_text`` до этого поднимал ``ToolError`` только
+#: по ``result.error``. Перечисленные ниже места апстрима ``error`` не ставят —
+#: они возвращают «мягкий» текст, и он уезжал клиенту как обычный успешный
+#: результат. Ровно тот молчаливый ложный успех, ради отсутствия которого этот
+#: сервер и написан: у штатного сервера бенчмарк намерил 16/16 таких по
+#: отсоединённому узлу.
+#:
+#: ЧТО СВЕРЯТЬ ПРИ ОБНОВЛЕНИИ browser-use: у каждой записи в ``source`` стоит
+#: файл и функция. Если апстрим переформулирует строку, регексп перестанет
+#: совпадать — молча, и дыра откроется снова. Поэтому строки продублированы в
+#: ``smoke.py`` (секция «false success»): там они прогоняются через
+#: ``BuMcpServer._classify_noop`` дословно, и рассинхрон падает тестом.
+NOOP_MARKERS: tuple[NoopMarker, ...] = (
+	NoopMarker(
+		pattern=re.compile(r'^Element index \d+ not available - page may have changed', re.MULTILINE),
+		actions=frozenset({'click', 'input', 'dropdown_options', 'select_dropdown'}),
+		code='stale-index',
+		source=(
+			'browser_use/tools/service.py — _click_by_index / input / dropdown_options / select_dropdown: '
+			"после `node = await browser_session.get_element_by_index(...)` -> None возвращают "
+			"`ActionResult(extracted_content=f'Element index {i} not available - page may have changed. "
+			"Try refreshing browser state.')` БЕЗ error=. Issues #5361, #5438."
+		),
+		hint=(
+			'Nothing was clicked, typed or read: the element vanished from the selector map between '
+			'the snapshot and this call. Call browser_state and use an index from the fresh snapshot.'
+		),
+	),
+	NoopMarker(
+		pattern=re.compile(r"^Text '.*?' not found or not visible on page$", re.MULTILINE),
+		actions=frozenset({'find_text'}),
+		code='text-not-found',
+		source=(
+			'browser_use/tools/service.py — find_text: ОДИН `except Exception` вокруг '
+			'`event.event_result(...)` покрывает и «текста нет», и «CDP отвалился», и обе ветки '
+			"отдают `ActionResult(extracted_content=f\"Text '{t}' not found or not visible on page\")` "
+			'БЕЗ error=.'
+		),
+		hint='The page was not scrolled.',
+	),
+	NoopMarker(
+		pattern=re.compile(r'^No options found in (?:dropdown|ARIA combobox) at index \d+', re.MULTILINE),
+		actions=frozenset({'dropdown_options'}),
+		code='no-dropdown-options',
+		source=(
+			'browser_use/browser/watchdogs/default_action_watchdog.py — on_GetDropdownOptionsEvent: '
+			"возвращает dict с ключом 'error', но dropdown_options в service.py проверяет только "
+			'`if not dropdown_data` (dict непустой) и отдаёт его short_term_memory как успех.'
+		),
+		hint='The element is not a dropdown, or its options are not populated yet.',
+	),
+	NoopMarker(
+		pattern=re.compile(r"is not one of the available options"),
+		actions=frozenset({'select_dropdown'}),
+		code='option-not-available',
+		source=(
+			'browser_use/browser/watchdogs/default_action_watchdog.py — on_SelectDropdownOptionEvent '
+			"при success=false возвращает short_term_memory='Available dropdown options  are:...' и "
+			'long_term_memory="Couldn\'t select the dropdown option as \'X\' is not one of the '
+			'available options."; service.py select_dropdown отдаёт их как обычный ActionResult без error=.'
+		),
+		hint='The selection did NOT change. Pick one of the options listed above verbatim.',
+	),
+	NoopMarker(
+		pattern=re.compile(r'^Attempted to switch to tab #', re.MULTILINE),
+		actions=frozenset({'switch'}),
+		code='switch-attempted',
+		source=(
+			'browser_use/tools/service.py — switch: `except Exception` отдаёт '
+			"`ActionResult(extracted_content=f'Attempted to switch to tab #{id}')` БЕЗ error=."
+		),
+		hint='Focus did not move. Call browser_state for the current tab list.',
+	),
+)
+
+#: Апстримный рапорт об авто-переключении на новую вкладку. Ставится
+#: безусловно: ``_detect_new_tab_opened`` (browser_use/tools/service.py) дёргает
+#: ``SwitchTabEvent`` с ``raise_if_any=False, raise_if_none=False``, результат
+#: (``None`` при провале) не смотрит и всё равно возвращает эту строку. Issue #5529.
+NEW_TAB_CLAIM_RE = re.compile(r'\.\s*Automatically switched to new tab \(tab_id: ([0-9A-Za-z]{2,})\)\.')
+
+#: Честная ветка того же ``_detect_new_tab_opened`` (когда switch бросил): вкладка
+#: открылась, переключения не было, и это прямо сказано. Её не переписываем, но и
+#: не дублируем своей заметкой.
+NEW_TAB_NOTE_RE = re.compile(r'\.\s*Note: This opened a new tab \(tab_id: ([0-9A-Za-z]{2,})\)')
+
+#: Снимок позиции прокрутки. Текстового признака для scroll не существует в
+#: принципе: в browser_use/tools/service.py цикл `for i in range(num_full_pages)`
+#: ловит и ГЛОТАЕТ исключение каждой отдельной прокрутки (`logger.warning` +
+#: continue), а при `pages == 1.0` — дефолт! — итоговая строка собирается как
+#: `f'Scrolled {direction} {target} {viewport_height}px'` вообще без оглядки на
+#: `completed_scrolls`. То есть ноль удавшихся прокруток печатается ровно тем же
+#: текстом, что и успешная. Поэтому проверяем фактом: scrollY/scrollX до и после.
+#:
+#: `sig` — подпись всех прокрученных контейнеров страницы, а не только корневого
+#: скроллера: `scroll(index=...)` крутит колесом над элементом, и уехать может
+#: любой вложенный div. Изменилась подпись — что-то на странице реально
+#: сдвинулось, и это уже не ложный успех.
+_SCROLL_PROBE_JS = """(() => {
+  const se = document.scrollingElement || document.documentElement || document.body;
+  const LIMIT = 20000;
+  const nodes = document.getElementsByTagName('*');
+  const n = Math.min(nodes.length, LIMIT);
+  let sig = 0, containers = 0;
+  for (let i = 0; i < n; i++) {
+    const el = nodes[i];
+    const t = el.scrollTop | 0, l = el.scrollLeft | 0;
+    if (t || l) { containers++; sig = (sig + (i + 1) * (t * 31 + l * 17)) % 2147483647; }
+  }
+  return {
+    y: se ? Math.round(se.scrollTop) : 0,
+    x: se ? Math.round(se.scrollLeft) : 0,
+    max_y: se ? Math.max(0, Math.round(se.scrollHeight - se.clientHeight)) : 0,
+    max_x: se ? Math.max(0, Math.round(se.scrollWidth - se.clientWidth)) : 0,
+    sig: sig,
+    containers: containers,
+    truncated: nodes.length > LIMIT,
+  };
+})()"""
+
+#: То же, но для `scroll(index=N)`: колесо крутится над элементом, а уезжает
+#: ближайший прокручиваемый предок (или сам элемент). Его и меряем — иначе
+#: «элемент домотан до конца» не отличить от «прокрутка не сработала».
+_SCROLL_TARGET_JS = """function () {
+  const scrollable = (el) => {
+    if (!(el instanceof Element)) return false;
+    const cs = getComputedStyle(el);
+    const okY = ['auto', 'scroll', 'overlay'].includes(cs.overflowY) && el.scrollHeight - el.clientHeight > 1;
+    const okX = ['auto', 'scroll', 'overlay'].includes(cs.overflowX) && el.scrollWidth - el.clientWidth > 1;
+    return okY || okX;
+  };
+  let el = this;
+  while (el && el !== document.body && el !== document.documentElement) {
+    if (scrollable(el)) {
+      return {
+        found: true,
+        y: Math.round(el.scrollTop), x: Math.round(el.scrollLeft),
+        max_y: Math.max(0, Math.round(el.scrollHeight - el.clientHeight)),
+        max_x: Math.max(0, Math.round(el.scrollWidth - el.clientWidth)),
+        tag: el.tagName.toLowerCase(),
+      };
+    }
+    el = el.parentElement;
+  }
+  return { found: false };
+}"""
 
 
 # --------------------------------------------------------------------------- #
@@ -460,13 +671,53 @@ class BuMcpServer:
 		return [types.TextContent(type='text', text=cls._json(payload, compact=compact))]
 
 	@staticmethod
-	def _action_result_text(name: str, result: Any) -> str:
-		"""Свернуть ``ActionResult`` в текст; ошибку действия поднять как ToolError."""
+	def _classify_noop(name: str, text: str) -> NoopMarker | None:
+		"""Найти в тексте результата известный маркер «действие не выполнилось».
+
+		Гейт по имени действия — часть контракта, а не оптимизация: ``search_page``,
+		``find_elements`` и ``evaluate`` кладут в ``extracted_content`` куски самой
+		страницы, и «Element index 5 not available» вполне может быть просто текстом
+		на странице. Проверяем только те действия, чьи функции апстрима эти строки
+		действительно порождают.
+		"""
+		if not text:
+			return None
+		for marker in NOOP_MARKERS:
+			if name in marker.actions and marker.pattern.search(text):
+				return marker
+		return None
+
+	@classmethod
+	def _action_result_text(cls, name: str, result: Any) -> str:
+		"""Свернуть ``ActionResult`` в текст; невыполненное действие поднять как ToolError.
+
+		Две ступени:
+
+		1. ``result.error`` — как было;
+		2. КОНТРАКТНАЯ ПРОВЕРКА по ``NOOP_MARKERS``: шесть мест browser-use
+		   возвращают «страница, возможно, изменилась» / «текста нет» / «такой
+		   опции нет» вообще без ``error``, и без этой ступени они уезжали
+		   клиенту успехом. См. комментарий у ``NOOP_MARKERS``.
+
+		Проверяются оба текстовых поля: у ``select_dropdown`` признак провала
+		сидит в ``long_term_memory``, тогда как ``extracted_content`` держит
+		вполне невинный список опций.
+		"""
 		if isinstance(result, ActionResult):
 			if result.error:
 				raise ToolError(f'{name} failed: {result.error}')
 			parts = [p for p in (result.extracted_content, result.long_term_memory) if p]
 			text = parts[0] if parts else f'{name}: ok'
+
+			marker = cls._classify_noop(name, '\n'.join(parts))
+			if marker is not None:
+				raise NoopResultError(
+					f'{name} did NOT run, but browser-use reported it as a normal result '
+					f'[{marker.code}]. browser-use said: {text.strip()!r}. {marker.hint}',
+					code=marker.code,
+					raw=text,
+				)
+
 			if result.attachments:
 				text += f'\nAttachments: {", ".join(result.attachments)}'
 			return text
@@ -491,7 +742,55 @@ class BuMcpServer:
 			raise
 		except Exception as exc:  # noqa: BLE001
 			raise ToolError(f'{name} failed: {type(exc).__name__}: {exc}') from exc
-		return self._action_result_text(name, result)
+		try:
+			return self._action_result_text(name, result)
+		except NoopResultError as exc:
+			raise await self._enrich_noop(session, exc) from None
+
+	async def _enrich_noop(self, session: BrowserSession, exc: NoopResultError) -> NoopResultError:
+		"""Дописать в сообщение то, чего апстрим не различил.
+
+		Пока единственный такой случай — ``find_text``: у него ОДИН
+		``except Exception`` на «текста нет» и «CDP умер», и наружу оба выходят
+		одной строкой. Отличить их постфактум можно только пробой живости, что
+		мы и делаем. Проба fail-open: не смогли — так и пишем.
+		"""
+		if exc.code != 'text-not-found':
+			return exc
+		alive = await self._page_alive(session)
+		if alive is True:
+			extra = (
+				'Liveness probe: the page is alive and answered CDP, so this is genuinely '
+				'"no such text on the page" — not a dead connection.'
+			)
+		elif alive is False:
+			extra = (
+				'Liveness probe: the page did NOT answer CDP. browser-use cannot tell these two '
+				'apart (one except Exception covers both), but here the transport looks broken, '
+				'not the text missing. Re-check browser_state before trusting anything else.'
+			)
+		else:
+			extra = 'Liveness probe was inconclusive; browser-use cannot tell "no such text" from "dead page" here.'
+		return NoopResultError(f'{exc} {extra}', code=exc.code, raw=exc.raw)
+
+	async def _page_alive(self, session: BrowserSession) -> bool | None:
+		"""``True`` / ``False`` / ``None`` (проверить не удалось)."""
+		try:
+			value = await asyncio.wait_for(self._evaluate(session, '1+1'), timeout=3.0)
+		except Exception:  # noqa: BLE001
+			return False
+		return True if value == 2 else None
+
+	async def _evaluate(self, session: BrowserSession, expression: str) -> Any:
+		"""Runtime.evaluate в текущей вкладке, без смены фокуса."""
+		cdp_session = await session.get_or_create_cdp_session(target_id=None, focus=False)
+		result = await cdp_session.cdp_client.send.Runtime.evaluate(
+			params={'expression': expression, 'returnByValue': True, 'awaitPromise': False},
+			session_id=cdp_session.session_id,
+		)
+		if result.get('exceptionDetails'):
+			raise RuntimeError(result['exceptionDetails'].get('text', 'JS exception'))
+		return (result or {}).get('result', {}).get('value')
 
 	# --- browser_state ----------------------------------------------------- #
 
@@ -701,6 +1000,7 @@ class BuMcpServer:
 		await self._check_domain_gate('click')
 
 		live_index, info = await self._resolve(session, int(args['index']))
+		tabs_before = await self._tab_snapshot(session)
 		try:
 			result = await tools.registry.execute_action(
 				'click',
@@ -711,10 +1011,114 @@ class BuMcpServer:
 		except Exception as exc:  # noqa: BLE001
 			raise ToolError(f'click on [{live_index}] failed: {type(exc).__name__}: {exc}') from exc
 
+		# Между `_resolve` и `execute_action` узел мог умереть — тогда апстрим
+		# вернёт «Element index N not available» БЕЗ error, и без контрактной
+		# проверки в `_action_result_text` это уехало бы клиенту успехом. Резолв
+		# эту гонку не закрывает: он смотрит на состояние ДО действия.
 		action_text = self._action_result_text('click', result)
+		tabs_after = await self._tab_snapshot(session)
+		action_text, tab_info = self._reconcile_new_tab(action_text, tabs_before, tabs_after)
 		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
 		return self._text(
-			{'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting}, compact=True
+			{'action': action_text, **info, 'tab': tab_info, 'url': await self._current_url(), 'waiting': waiting},
+			compact=True,
+		)
+
+	# --- вкладки: факт вместо оптимизма (#5529) ---------------------------- #
+
+	@staticmethod
+	def _short_tab_id(target_id: str | None) -> str | None:
+		"""Последние 4 символа target_id — ровно то, что принимают switch/close."""
+		return target_id[-4:] if target_id else None
+
+	async def _tab_snapshot(self, session: BrowserSession) -> dict[str, Any]:
+		"""Кто в фокусе и какие вкладки открыты. Fail-open: не смогли — пустой снимок."""
+		snapshot: dict[str, Any] = {'focus': getattr(session, 'agent_focus_target_id', None), 'ids': []}
+		try:
+			snapshot['ids'] = [t.target_id for t in await session.get_tabs()]
+		except Exception:  # noqa: BLE001
+			snapshot['ids'] = []
+		return snapshot
+
+	@classmethod
+	def _reconcile_new_tab(
+		cls, text: str, before: dict[str, Any], after: dict[str, Any]
+	) -> tuple[str, dict[str, Any]]:
+		"""Сверить апстримный рапорт о новой вкладке с фактическим фокусом.
+
+		Issue #5529: ``_detect_new_tab_opened`` в browser_use/tools/service.py
+		дёргает ``SwitchTabEvent`` с ``raise_if_any=False, raise_if_none=False``,
+		не смотрит на результат (``None`` = переключение провалилось) и ВСЕГДА
+		возвращает «Automatically switched to new tab». Мы эту фразу выкидываем и
+		пишем то, что видно по ``agent_focus_target_id`` и списку target_id до и
+		после клика.
+
+		Функция чистая: весь ввод — два снимка и строка. Так её можно прогнать
+		тестом на дословном тексте апстрима, не воспроизводя гонку в браузере.
+		"""
+		short = cls._short_tab_id
+		before_ids = list(before.get('ids') or [])
+		after_ids = list(after.get('ids') or [])
+		focus_before, focus_after = before.get('focus'), after.get('focus')
+		opened = [t for t in after_ids if t not in before_ids]
+		closed = [t for t in before_ids if t not in after_ids]
+
+		info: dict[str, Any] = {
+			'focus_before': short(focus_before),
+			'focus_after': short(focus_after),
+			'opened': [short(t) for t in opened],
+			'switched': bool(focus_after and focus_after != focus_before),
+		}
+		if closed:
+			info['closed'] = [short(t) for t in closed]
+
+		claim = NEW_TAB_CLAIM_RE.search(text)
+		if claim is None:
+			# Апстрим ничего не заявил. Честная ветка `_detect_new_tab_opened`
+			# («Note: This opened a new tab …») уже всё сказала — не дублируем.
+			if opened and not NEW_TAB_NOTE_RE.search(text):
+				info['claim'] = 'silent-open'
+				text = (
+					f'{text.rstrip(". ")}. Note: {len(opened)} new tab(s) opened '
+					f'(tab_id: {", ".join(str(short(t)) for t in opened)}); focus stayed on '
+					f'tab #{short(focus_after)}. Use switch(tab_id=...) to go there.'
+				)
+			elif info['switched'] and not opened:
+				info['claim'] = 'silent-switch'
+				text = (
+					f'{text.rstrip(". ")}. Note: focus moved from tab #{short(focus_before)} '
+					f'to tab #{short(focus_after)} without browser-use saying so.'
+				)
+			else:
+				info['claim'] = 'none' if not opened else 'upstream-note'
+			return text, info
+
+		claimed = claim.group(1)
+		info['claimed'] = claimed
+		body = NEW_TAB_CLAIM_RE.sub('', text).rstrip(' .')
+		claimed_lc = claimed.lower()
+		focus_after_short = (short(focus_after) or '').lower()
+
+		if focus_after_short and focus_after_short == claimed_lc:
+			info['claim'] = 'verified'
+			return f'{body}. Opened a new tab and switched to it (tab_id: {claimed}) — verified by target_id.', info
+
+		if focus_after == focus_before:
+			info['claim'] = 'false'
+			gone = ' (that tab no longer exists)' if claimed not in [short(t) for t in after_ids] else ''
+			return (
+				f'{body}. WARNING: browser-use claimed it automatically switched to a new tab '
+				f'(tab_id: {claimed}){gone}, but the active tab is still #{short(focus_before)}. '
+				f'The switch did not happen (browser-use issue #5529: it reports the switch '
+				f'without checking the result). Call switch(tab_id="{claimed}") if you want that tab.',
+				info,
+			)
+
+		info['claim'] = 'mismatch'
+		return (
+			f'{body}. WARNING: browser-use claimed a switch to tab #{claimed}, but the active tab '
+			f'is #{short(focus_after)}. Trust the latter; call browser_state to see where you are.',
+			info,
 		)
 
 	# --- browser_type ------------------------------------------------------ #
@@ -773,6 +1177,261 @@ class BuMcpServer:
 			types.ImageContent(type='image', data=base64.b64encode(data).decode(), mimeType='image/png'),
 		]
 
+	# --- scroll: проверка фактом ------------------------------------------- #
+
+	async def _scroll_probe(self, session: BrowserSession, node: Any) -> dict[str, Any]:
+		"""Позиция прокрутки: корневой скроллер + подпись контейнеров (+ цель, если задан index).
+
+		Fail-open: если проба не удалась, возвращается ``{'ok': False}``, и
+		верификация переходит в статус ``unverified`` вместо ложной ошибки.
+		"""
+		probe: dict[str, Any] = {'ok': False}
+		try:
+			page = await asyncio.wait_for(self._evaluate(session, _SCROLL_PROBE_JS), timeout=3.0)
+		except Exception:  # noqa: BLE001
+			return probe
+		if not isinstance(page, dict):
+			return probe
+		probe = {'ok': True, 'page': page, 'target': None}
+		if node is None:
+			return probe
+		try:
+			cdp_session = await session.cdp_client_for_node(node)
+			resolved = await cdp_session.cdp_client.send.DOM.resolveNode(
+				params={'backendNodeId': node.backend_node_id}, session_id=cdp_session.session_id
+			)
+			object_id = resolved['object']['objectId']
+			out = await cdp_session.cdp_client.send.Runtime.callFunctionOn(
+				params={'functionDeclaration': _SCROLL_TARGET_JS, 'objectId': object_id, 'returnByValue': True},
+				session_id=cdp_session.session_id,
+			)
+			value = out.get('result', {}).get('value')
+			if isinstance(value, dict) and value.get('found'):
+				probe['target'] = value
+		except Exception:  # noqa: BLE001
+			probe['target'] = None
+		return probe
+
+	@staticmethod
+	def _scroll_moved(before: dict[str, Any], after: dict[str, Any]) -> bool:
+		"""Сдвинулось ли хоть что-нибудь: корневой скроллер, подпись или цель."""
+		bp, ap = before.get('page') or {}, after.get('page') or {}
+		if (bp.get('y'), bp.get('x'), bp.get('sig')) != (ap.get('y'), ap.get('x'), ap.get('sig')):
+			return True
+		bt, at = before.get('target') or {}, after.get('target') or {}
+		return bool(bt) and bool(at) and (bt.get('y'), bt.get('x')) != (at.get('y'), at.get('x'))
+
+	async def _tool_scroll(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""``scroll`` реестра + верификация фактом по scrollY/scrollX.
+
+		Зачем override. У ``scroll`` в browser_use/tools/service.py нет текста,
+		по которому провал можно опознать: цикл по страницам глотает исключения
+		(`logger.warning` + continue), а при ``pages == 1.0`` — это ДЕФОЛТ —
+		итоговая строка `f'Scrolled {direction} {target} {viewport_height}px'`
+		печатается независимо от ``completed_scrolls``. Полный провал прокрутки
+		выглядит дословно как успех. Поэтому меряем позицию до и после.
+
+		Три исхода:
+
+		* прокрутилось -> успех, в ответе фактическая дельта;
+		* не прокрутилось, НО крутить было некуда (мы уже в конце / страница не
+		  прокручивается) -> ЧЕСТНЫЙ СТАТУС ``at-end``, а НЕ ошибка. Обоснование:
+		  ничего не сломано, клиент увидел ровно тот мир, который просил показать;
+		  ``ToolError`` здесь сломал бы совершенно нормальный цикл «мотать вниз,
+		  пока не кончится страница» и толкал бы клиента на бессмысленные ретраи.
+		  Но и молчать нельзя: строка «Scrolled down 479px» в этом случае — ложь,
+		  поэтому ``action`` переписывается, а ``scrolled`` равен ``false``;
+		* не прокрутилось, хотя крутить БЫЛО куда -> ``ToolError``. Это и есть
+		  закрываемая дыра.
+		"""
+		session, tools = await self._ensure_session()
+		await self._check_domain_gate('scroll')
+
+		index = args.get('index')
+		node = None
+		if index is not None and int(index) != 0:
+			try:
+				node = await session.get_element_by_index(int(index))
+			except Exception:  # noqa: BLE001
+				node = None
+
+		before = await self._scroll_probe(session, node)
+		try:
+			result = await tools.registry.execute_action(
+				'scroll', args, browser_session=session, file_system=self._file_system
+			)
+		except ToolError:
+			raise
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'scroll failed: {type(exc).__name__}: {exc}') from exc
+		upstream = self._action_result_text('scroll', result)
+
+		# Плавная прокрутка (scroll-behavior: smooth) доезжает не мгновенно —
+		# даём ей досесть, но только если с первой пробы ничего не сдвинулось.
+		after = await self._scroll_probe(session, node)
+		for _ in range(4):
+			if not (before.get('ok') and after.get('ok')) or self._scroll_moved(before, after):
+				break
+			await asyncio.sleep(0.1)
+			after = await self._scroll_probe(session, node)
+
+		return self._text(self._scroll_verdict(args, before, after, upstream), compact=True)
+
+	@classmethod
+	def _scroll_verdict(
+		cls, args: dict[str, Any], before: dict[str, Any], after: dict[str, Any], upstream: str
+	) -> dict[str, Any]:
+		"""Чистая часть проверки скролла: два снимка + рапорт апстрима -> ответ клиенту."""
+		down = bool(args.get('down', True))
+		direction = 'down' if down else 'up'
+		payload: dict[str, Any] = {'upstream_report': upstream.strip()}
+
+		if not (before.get('ok') and after.get('ok')):
+			payload.update(
+				action=(
+					f'{upstream.strip()} — NOT VERIFIED: could not read the scroll position '
+					f'(CDP probe failed), so this report comes from browser-use unchecked.'
+				),
+				scrolled=None,
+				status='unverified',
+			)
+			return payload
+
+		bp, ap = before['page'], after['page']
+		target_before, target_after = before.get('target'), after.get('target')
+		scope = 'element' if target_before and target_after else 'page'
+		ref_before = target_before if scope == 'element' else bp
+		ref_after = target_after if scope == 'element' else ap
+
+		delta_y = int(ref_after.get('y', 0)) - int(ref_before.get('y', 0))
+		delta_x = int(ref_after.get('x', 0)) - int(ref_before.get('x', 0))
+		room = int(ref_before.get('max_y', 0)) - int(ref_before.get('y', 0)) if down else int(ref_before.get('y', 0))
+		payload.update(
+			scope=scope,
+			delta={'y': delta_y, 'x': delta_x},
+			position={
+				'y': int(ref_after.get('y', 0)),
+				'x': int(ref_after.get('x', 0)),
+				'max_y': int(ref_after.get('max_y', 0)),
+				'max_x': int(ref_after.get('max_x', 0)),
+			},
+		)
+
+		if cls._scroll_moved(before, after):
+			payload.update(scrolled=True, status='scrolled')
+			at_end = (
+				int(ref_after.get('y', 0)) >= int(ref_after.get('max_y', 0))
+				if down
+				else int(ref_after.get('y', 0)) <= 0
+			)
+			payload['at_end'] = at_end
+			tail = f' — {"bottom" if down else "top"} reached.' if at_end else '.'
+			if delta_y:
+				payload['action'] = (
+					f'Scrolled {direction} {abs(delta_y)}px '
+					f'(scrollY {ref_before.get("y", 0)} -> {ref_after.get("y", 0)} '
+					f'of {ref_after.get("max_y", 0)}){tail}'
+				)
+			elif delta_x:
+				payload['action'] = (
+					f'Scrolled {abs(delta_x)}px horizontally '
+					f'(scrollX {ref_before.get("x", 0)} -> {ref_after.get("x", 0)} '
+					f'of {ref_after.get("max_x", 0)}){tail}'
+				)
+			else:
+				# Корневой скроллер стоит, но подпись контейнеров изменилась:
+				# уехал какой-то вложенный div, а не страница.
+				payload['at_end'] = False
+				payload['action'] = (
+					f'Scrolled {direction}: the {scope} scroller did not move (y={ref_after.get("y", 0)}), '
+					f'but a nested scroll container did. browser-use reported {upstream.strip()!r}.'
+				)
+			return payload
+
+		if bp.get('truncated'):
+			# Подпись контейнеров считалась не по всему документу — «не сдвинулось»
+			# может быть артефактом обрезки. Ложную ошибку не поднимаем.
+			payload.update(
+				scrolled=None,
+				status='unverified',
+				action=(
+					f'{upstream.strip()} — NOT VERIFIED: the document is too large to check every '
+					f'scroll container, and the root scroller did not move.'
+				),
+			)
+			return payload
+
+		if room <= 1:
+			payload.update(scrolled=False, status='at-end', at_end=True)
+			nothing = int(ref_before.get('max_y', 0)) <= 1
+			payload['action'] = (
+				(
+					f'Nothing scrolled: this {scope} does not scroll at all (content fits). '
+					if nothing
+					else f'Nothing scrolled: already at the {"bottom" if down else "top"} of this {scope} '
+					f'(y={ref_before.get("y", 0)} of {ref_before.get("max_y", 0)}). '
+				)
+				+ f'browser-use reported {upstream.strip()!r}; that is its fixed string, not a measurement.'
+			)
+			return payload
+
+		raise ToolError(
+			f'scroll did NOT move anything, but browser-use reported {upstream.strip()!r} as a success. '
+			f'Measured: {scope} scroll position stayed at y={ref_before.get("y", 0)} while {room}px of '
+			f'content remain {"below" if down else "above"} (max_y={ref_before.get("max_y", 0)}). '
+			f'browser-use cannot detect this: its per-page loop swallows failed scrolls and at the '
+			f'default pages=1.0 prints a fixed "Scrolled ... px" string regardless. '
+			f'Something is blocking the scroll — overflow:hidden on the document, a modal scroll-lock, '
+			f'or the real scroller is a nested container. Try scroll(index=<container index>) or '
+			f'send_keys(keys="PageDown").'
+		)
+
+	# --- switch: проверка фактом ------------------------------------------- #
+
+	async def _tool_switch(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""``switch`` реестра + сверка фактического фокуса.
+
+		Апстрим (browser_use/tools/service.py, ``switch``) берёт результат
+		``SwitchTabEvent`` с ``raise_if_any=False, raise_if_none=False`` и, если
+		тот вернул ``None`` (то есть переключение провалилось), всё равно пишет
+		``f'Switched to tab #{params.tab_id}'``. Плюс ``except Exception`` отдаёт
+		``'Attempted to switch to tab #...'`` — тоже как успех. Первое ловится
+		только сверкой ``agent_focus_target_id``, второе — таблицей NOOP_MARKERS.
+		"""
+		session, tools = await self._ensure_session()
+		await self._check_domain_gate('switch')
+
+		before = await self._tab_snapshot(session)
+		try:
+			result = await tools.registry.execute_action(
+				'switch', args, browser_session=session, file_system=self._file_system
+			)
+		except ToolError:
+			raise
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'switch failed: {type(exc).__name__}: {exc}') from exc
+		upstream = self._action_result_text('switch', result)
+
+		after = await self._tab_snapshot(session)
+		focus_after = self._short_tab_id(after.get('focus'))
+		requested = str(args.get('tab_id') or '').strip()
+		if requested and (focus_after or '').lower() != requested[-4:].lower():
+			raise ToolError(
+				f'switch did NOT change the active tab, but browser-use reported {upstream.strip()!r}. '
+				f'Requested tab #{requested}, active tab is still #{self._short_tab_id(before.get("focus"))}. '
+				f'browser-use takes the SwitchTabEvent result with raise_if_none=False and prints the '
+				f'requested id even when the event returned nothing. Call browser_state for the live tab list.'
+			)
+		return self._text(
+			{
+				'action': f'Active tab is #{focus_after} (verified by target_id).',
+				'upstream_report': upstream.strip(),
+				'tab': {'focus_before': self._short_tab_id(before.get('focus')), 'focus_after': focus_after},
+				'url': await self._current_url(),
+			},
+			compact=True,
+		)
+
 	@staticmethod
 	def _downscale_png(raw: bytes, max_dim: int) -> tuple[bytes, dict[str, Any]]:
 		try:
@@ -829,6 +1488,11 @@ class BuMcpServer:
 				'browser_click': self._tool_browser_click,
 				'browser_type': self._tool_browser_type,
 				'browser_screenshot': self._tool_browser_screenshot,
+				# Не подмена инструмента, а верификация реестрового: схему эти два
+				# по-прежнему берут из реестра (см. _build_tool_list), меняется
+				# только то, что результат сверяется с фактом, а не берётся на веру.
+				'scroll': self._tool_scroll,
+				'switch': self._tool_switch,
 			}
 			if name in overrides:
 				return await overrides[name](args)

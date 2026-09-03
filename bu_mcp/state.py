@@ -14,8 +14,12 @@ This module reuses that representation verbatim and adds:
   would otherwise be less addressable than the flat JSON it replaces), with
   Skyvern-style placeholdering of long URLs -- but only for the URLs where the
   indirection is measurably cheaper than printing the link inline;
-* Private Use Area glyphs (icon fonts) collapsed to ``[icon]``;
+* Private Use Area glyphs (icon fonts) collapsed to ``[icon:<code points>]`` --
+  one legible token per icon, still one token per distinct glyph;
 * attribute-detected custom dropdowns rendered as ``<select>``;
+* the ``... N more options...`` marker that upstream slices off every
+  ``<select>`` with more than four options (issue #5195) recomputed from
+  ``count=`` and put back, pointing at ``dropdown_options`` for the full list;
 * explicit "what you are not seeing" markers -- page-level pages above/below
   and a count of interactive elements cut off by the viewport+1000px
   visibility threshold (``browser_use/dom/service.py:64``).
@@ -64,6 +68,25 @@ _MAX_COUNTED_OFFSCREEN = 500
 # Private Use Area: icon fonts (Font Awesome, Material Icons, ...) render as
 # these code points and carry zero information for the model.
 _PUA_RUN = re.compile('[\ue000-\uf8ff](?:[\ue000-\uf8ff]|\\s(?=[\ue000-\uf8ff]))*')
+
+#: How many code points of one icon run are spelled out before the rest is
+#: summarised as ``+Nmore``.  Bounds the worst case of a pathologically long run.
+_ICON_MAX_CODEPOINTS = 4
+
+#: ``count=N,options=A|B|C|D`` inside a ``compound_components=(...)`` group.
+#: The option list runs to the next ``,`` (a following ``format=``, or the next
+#: group) or to the ``)`` that closes the group -- neither can appear inside an
+#: option label without the label having been unescaped at the source anyway.
+_COMPOUND_OPTIONS = re.compile(r'count=(?P<count>\d+),options=(?P<options>[^,)]*)(?=,|\))')
+
+#: Mirrors the ``first_options[:4]`` slice in
+#: ``browser_use/dom/serializer/serializer.py:1074`` -- the number of real option
+#: labels the tree can ever show.
+_MAX_SHOWN_OPTIONS = 4
+
+#: What goes back where that slice ate the marker.  ~29 characters, once per
+#: truncated ``<select>``.
+_OPTIONS_MARKER = '|+{n} more via dropdown_options'
 
 # A serialized element line, e.g.
 #   \t\t|SHADOW(open)|*|scroll element[12]<div role=button aria-label=Menu /> (0.0 pages above, 1.2 pages below)
@@ -156,22 +179,101 @@ def _worth_placeholdering(url: str, raw_lengths: list[int]) -> bool:
 	return mapped < inline
 
 
+def _icon_token(match: re.Match[str]) -> str:
+	"""One collapsed icon run, as ``[icon:<hex>[+<hex>...][+Nmore]]``."""
+	points = [f'{ord(ch):x}' for ch in match.group(0) if '\ue000' <= ch <= '\uf8ff']
+	head = points[:_ICON_MAX_CODEPOINTS]
+	rest = len(points) - len(head)
+	return f'[icon:{"+".join(head)}{f"+{rest}more" if rest else ""}]'
+
+
 def collapse_pua(text: str) -> str:
-	"""Collapse runs of Private Use Area glyphs (icon fonts) into ``[icon]``.
+	"""Collapse runs of Private Use Area glyphs (icon fonts) into ``[icon:e001]``.
 
 	Unlike the href map this is a substitution, not an indirection: nothing is
 	kept twice, so it cannot be a net loss the way an unshared placeholder is.
-	Its worst case is a one-glyph run, which costs +5 characters -- but only +3
-	bytes on the wire, since every PUA code point is 3 bytes in the UTF-8 the
-	payload is serialized as, and 2 glyphs already break even in bytes.  On the
-	16-site bench corpus the substitution never fires at all (zero PUA runs), so
-	it is measured at exactly 0 characters there and left unconditional: the
-	bounded downside buys a legible token in place of a code point that renders
-	as nothing.
+
+	The first version of this emitted a bare ``[icon]`` and threw the code point
+	away.  That is free on a page where every icon button also carries an
+	``aria-label`` -- which is every page in the 16-site bench corpus, where the
+	substitution never fires at all -- and a dead end on the dense unlabelled
+	toolbars the corpus does not contain.  There the glyph *is* the only thing
+	telling one button from the next, so erasing it made five buttons textually
+	identical and left the model nothing to name the one it wanted.  Keeping the
+	code point restores that: the token is a pure function of the code points, so
+	one glyph gives one string, the same string on every snapshot.
+
+	A run of several glyphs stays **one** token and lists every code point --
+	``[icon:e001+e002]``.  Icon fonts stack a base glyph and a modifier into what
+	renders as a single icon, so splitting the run would invent elements that are
+	not there; keeping only the first code point would re-merge exactly the runs
+	the code point is here to separate.  Long runs are capped at
+	``_ICON_MAX_CODEPOINTS`` spelled-out code points plus a ``+Nmore`` count,
+	which bounds the worst case at the price of colliding two runs that agree on
+	their first four code points -- a trade worth making, since the alternative is
+	an unbounded token.
+
+	Cost: a one-glyph run goes from 1 character to 11 (``[icon:e001]``) against 6
+	for the old bare marker, i.e. 3 bytes to 11 in the UTF-8 the payload is
+	actually serialized as.  On the bench corpus both forms measure exactly 0, no
+	site there emitting a PUA run at all, so the whole cost lands on the pages the
+	corpus is missing -- which are also the only pages that get anything back.
 	"""
 	if not text:
 		return text
-	return _PUA_RUN.sub('[icon]', text)
+	return _PUA_RUN.sub(_icon_token, text)
+
+
+def restore_option_marker(text: str) -> str:
+	"""Put back the ``... N more options...`` marker upstream slices off.
+
+	``_extract_select_options`` (``browser_use/dom/serializer/serializer.py:415``)
+	builds ``first_options`` as four option labels **plus a fifth element** -- the
+	``... N more options...`` marker.  Its caller then prints
+	``first_options[:4]`` (:1074), which cuts off exactly that fifth element and
+	nothing else.  The model is handed ``count=6,options=A|B|C|D``: the count is there,
+	but nothing on the line says the four labels are not the whole list, so
+	picking the best of A..D reads as a complete choice.  Deterministic, fires on
+	every ``<select>`` with more than four options (issue #5195).
+
+	The serializer is not ours to patch and does not need to be: both halves of
+	the fact survive into the tree.  ``count=N`` against the number of labels
+	actually printed is the entire signal, so the marker is recomputed from the
+	text.  It names ``dropdown_options`` because that -- not scrolling, not
+	guessing -- is where the rest of the list lives in this server.
+
+	Deliberately narrow: it fires only on the exact shape of the upstream bug,
+	``count > 4`` with exactly four labels shown.  Anything else is left alone --
+	fewer labels means the parse hit a ``,`` or ``)`` inside a label (the option
+	list is not escaped at the source, so no parse of it can be exact), more
+	labels or a marker already present means upstream stopped truncating and a
+	second marker would be a lie.  It only ever inserts; it never deletes text.
+
+	Cost: ~29 characters, once per truncated ``<select>``, and zero on any tree
+	that has none.
+	"""
+
+	def _sub(m: re.Match[str]) -> str:
+		count = int(m.group('count'))
+		shown = m.group('options').split('|')
+		if len(shown) != _MAX_SHOWN_OPTIONS or count <= _MAX_SHOWN_OPTIONS:
+			return m.group(0)
+		if any('more options' in s or 'more via dropdown_options' in s for s in shown):
+			return m.group(0)
+		return m.group(0) + _OPTIONS_MARKER.format(n=count - _MAX_SHOWN_OPTIONS)
+
+	if 'options=' not in text:
+		return text
+	return _COMPOUND_OPTIONS.sub(_sub, text)
+
+
+def _rewrite_text(line: str) -> str:
+	"""The two text-level fixes, in the order they have to run.
+
+	Marker first, so the literal it inserts can never be mistaken for page text;
+	icons second, so an option label that is itself a glyph still collapses.
+	"""
+	return collapse_pua(restore_option_marker(line))
 
 
 def _node_attrs(node: Any) -> dict[str, str]:
@@ -278,8 +380,8 @@ def _rewrite_tree(tree: str, selector_map: dict[int, Any], base_url: str) -> tup
 	"""Post-process ``llm_representation`` output.
 
 	Adds hrefs (placeholdered only where the map pays for itself), retags
-	dropdown-like elements as ``<select>`` and collapses icon glyphs.  Returns
-	``(tree, href_map)``.
+	dropdown-like elements as ``<select>``, collapses icon glyphs and restores the
+	truncated-option marker upstream drops.  Returns ``(tree, href_map)``.
 	"""
 	placeholdered = _plan_hrefs(tree, selector_map, base_url)
 	href_map: dict[str, str] = {}
@@ -288,13 +390,13 @@ def _rewrite_tree(tree: str, selector_map: dict[int, Any], base_url: str) -> tup
 	for line in tree.split('\n'):
 		m = _ELEMENT_LINE.match(line)
 		if not m:
-			out.append(collapse_pua(line))
+			out.append(_rewrite_text(line))
 			continue
 
 		index = int(m.group('index'))
 		node = selector_map.get(index)
 		if node is None:
-			out.append(collapse_pua(line))
+			out.append(_rewrite_text(line))
 			continue
 
 		tag = m.group('tag')
@@ -322,7 +424,7 @@ def _rewrite_tree(tree: str, selector_map: dict[int, Any], base_url: str) -> tup
 			attrs = f'{attrs} {" ".join(extra)}' if attrs else ' ' + ' '.join(extra)
 
 		rebuilt = f'{m.group("indent")}{m.group("prefix")}[{index}]<{tag}{attrs} />{m.group("tail")}'
-		out.append(collapse_pua(rebuilt))
+		out.append(_rewrite_text(rebuilt))
 
 	return '\n'.join(out), href_map
 
@@ -666,6 +768,85 @@ async def _selfcheck() -> int:
 			):
 				failures.append(f'{url}: truncated tree lost its bottom visibility marker')
 			print(f'truncation @{cap}: len={len(small["tree"])} truncated={small["truncated"]}')
+
+		# --- synthetic pages -------------------------------------------------
+		# Both fixes target shapes the 16-site bench corpus does not contain
+		# (unlabelled icon fonts, <select> with more than four options), so the
+		# only place they can be exercised is a page we build ourselves.
+		async def _evaluate(expr: str) -> Any:
+			cdp = await session.get_or_create_cdp_session(session.agent_focus_target_id, focus=False)
+			res = await cdp.cdp_client.send.Runtime.evaluate(
+				params={'expression': expr, 'returnByValue': True, 'awaitPromise': True},
+				session_id=cdp.session_id,
+			)
+			if 'exceptionDetails' in res:
+				raise RuntimeError(f'JS failed: {res["exceptionDetails"]}')
+			return res.get('result', {}).get('value')
+
+		await session.event_bus.dispatch(NavigateToUrlEvent(url='https://example.com', new_tab=True))
+		await asyncio.sleep(1.5)
+		ours |= {t.target_id for t in await session.get_tabs()} - before
+
+		print('=' * 78)
+		print('SYNTHETIC 1: toolbar of five icon buttons whose only label is a')
+		print('             Private Use Area glyph -- nothing else tells them apart.')
+		# The glyph goes in aria-label rather than in the button text on purpose:
+		# upstream drops any text node shorter than two characters
+		# (browser_use/dom/serializer/serializer.py:555), so a lone glyph in the
+		# element body never reaches the tree at all.  Attributes are where PUA
+		# actually shows up -- aria-label, title, placeholder, value, alt.
+		await _evaluate(
+			"(() => { let h = ''; for (let i = 1; i <= 5; i++) { "
+			"h += '<button aria-label=\"' + String.fromCharCode(0xe000 + i) + '\"></button>'; } "
+			'document.body.innerHTML = h; return true; })()'
+		)
+		icons = await serialize_state(session)
+		print('-' * 78)
+		print(icons['tree'])
+		print('-' * 78)
+		tokens = re.findall(r'\[icon:[^\]]+\]', icons['tree'])
+		btn_lines = [ln.strip() for ln in icons['tree'].split('\n') if '[icon:' in ln]
+		# Strip the element index: what is left is what the model has to name the
+		# button by.  Under the old bare [icon] all five collapse onto one string.
+		bare = {re.sub(r'\[\d+\]', '[N]', re.sub(r'\[icon:[^\]]+\]', '[icon]', ln)) for ln in btn_lines}
+		kept = {re.sub(r'\[\d+\]', '[N]', ln) for ln in btn_lines}
+		print(f'icon tokens          : {tokens}')
+		print(f'distinct lines, [icon]      : {len(bare)}  (old form -- all five buttons identical)')
+		print(f'distinct lines, [icon:<cp>] : {len(kept)}  (new form)')
+		if sorted(set(tokens)) != [f'[icon:e00{i}]' for i in range(1, 6)]:
+			failures.append(f'icons: expected e001..e005, got {sorted(set(tokens))}')
+		if len(kept) != 5:
+			failures.append(f'icons: {len(kept)} distinct button lines, expected 5')
+		if len(bare) != 1:
+			failures.append(f'icons: old form should collapse to 1 line, got {len(bare)}')
+		if any('\ue000' <= ch <= '\uf8ff' for ch in icons['tree']):
+			failures.append('icons: raw PUA glyph left in the tree')
+		icon_cost = len(icons['tree']) - len(re.sub(r'\[icon:[^\]]+\]', '[icon]', icons['tree']))
+		print(f'cost of keeping the code points: {icon_cost:+d} chars over 5 icons')
+
+		print('=' * 78)
+		print('SYNTHETIC 2: <select> with six options -- upstream prints four and')
+		print('             slices off its own "... N more options..." marker (#5195)')
+		await _evaluate(
+			"(() => { const labels = ['Alpha','Bravo','Charlie','Delta','Echo','Foxtrot']; "
+			"document.body.innerHTML = '<select>' + labels.map(t => '<option>' + t + '</option>').join('') "
+			"+ '</select>'; return true; })()"
+		)
+		sel = await serialize_state(session)
+		print('-' * 78)
+		print(sel['tree'])
+		print('-' * 78)
+		sel_line = next((ln.strip() for ln in sel['tree'].split('\n') if 'count=' in ln and 'options=' in ln), '')
+		upstream_line = sel_line.replace(_OPTIONS_MARKER.format(n=2), '')
+		print(f'upstream : {upstream_line}')
+		print(f'ours     : {sel_line}')
+		print(f'cost     : {len(sel_line) - len(upstream_line):+d} chars')
+		if not sel_line:
+			failures.append('select: no compound_components line in the tree')
+		elif 'count=6' not in sel_line:
+			failures.append(f'select: expected count=6, got {sel_line!r}')
+		elif '+2 more via dropdown_options' not in sel_line:
+			failures.append(f'select: marker not restored: {sel_line!r}')
 	finally:
 		for target_id in ours:
 			try:
@@ -690,10 +871,38 @@ async def _selfcheck() -> int:
 		else 'TOTAL: nothing measured'
 	)
 
-	# Offline unit checks for the three token-economy tricks.
-	_icons = 'Menu \ue000\ue001 open'
-	assert collapse_pua(_icons) == 'Menu [icon] open', collapse_pua(_icons)
+	# Offline unit checks for the token-economy tricks.
+	# Icons: one token per run, but the code points survive, so two buttons that
+	# differ only by glyph stay two different strings.
+	assert collapse_pua('Menu \ue000\ue001 open') == 'Menu [icon:e000+e001] open', collapse_pua('Menu \ue000\ue001 open')
+	assert collapse_pua('\ue001') == '[icon:e001]' and collapse_pua('\ue002') == '[icon:e002]'
+	assert collapse_pua('\ue001') != collapse_pua('\ue002'), 'glyphs must stay distinguishable'
+	assert collapse_pua('\ue001') == collapse_pua('\ue001'), 'same glyph must give the same token'
+	assert collapse_pua('a\ue001b\ue002') == 'a[icon:e001]b[icon:e002]'
+	# Long runs are capped, not unbounded.
+	assert collapse_pua('\ue000\ue001\ue002\ue003\ue004\ue005') == '[icon:e000+e001+e002+e003+2more]', collapse_pua(
+		'\ue000\ue001\ue002\ue003\ue004\ue005'
+	)
 	assert collapse_pua('plain text') == 'plain text'
+	assert collapse_pua('') == ''
+
+	# <select>: the marker upstream's first_options[:4] slice eats (issue #5195).
+	_sel = '[5]<select compound_components=(role=listbox,name=Options,count=6,options=A|B|C|D) />'
+	assert restore_option_marker(_sel).endswith('options=A|B|C|D|+2 more via dropdown_options) />'), restore_option_marker(_sel)
+	# ...still restored when a format hint follows the option list.
+	_fmt = 'count=7,options=A|B|C|D,format=numeric)'
+	assert (
+		restore_option_marker(_fmt) == 'count=7,options=A|B|C|D|+3 more via dropdown_options,format=numeric)'
+	), restore_option_marker(_fmt)
+	# Nothing missing -> nothing added.
+	assert restore_option_marker('count=4,options=A|B|C|D)') == 'count=4,options=A|B|C|D)'
+	assert restore_option_marker('count=3,options=A|B|C)') == 'count=3,options=A|B|C)'
+	# Upstream marker already present -> no second one.
+	_already = 'count=9,options=A|B|C|... 5 more options...)'
+	assert restore_option_marker(_already) == _already, restore_option_marker(_already)
+	assert restore_option_marker(restore_option_marker(_sel)) == restore_option_marker(_sel), 'not idempotent'
+	# Not a select line at all -> untouched.
+	assert restore_option_marker('[1]<a href=/x />') == '[1]<a href=/x />'
 	long_url = 'https://x.test/' + 'a' * 200
 	ph = _href_placeholder(long_url)
 	assert re.fullmatch(r'\{\{_[0-9a-f]{12}\}\}', ph), ph
