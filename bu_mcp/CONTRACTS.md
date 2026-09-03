@@ -46,7 +46,62 @@ baseline снимается уже после действия, то есть с
 Дерево уехало из JSON-поля намеренно: внутри строки каждый `\n` и `\t` стоил два
 символа. Клиент, который парсит ответ как один JSON, сломается — блоков два.
 
-`browser_click` / `browser_type` / `browser_screenshot` — тоже компактный JSON.
+`browser_click` -> один текстовый блок, компактный JSON:
+`{'action', 'requested_index', 'resolved_index', 'resolution'?, 'tab', 'url', 'waiting', 'delta'}`.
+`tab` = `{'focus_before', 'focus_after', 'opened': [...], 'switched', 'claim', 'closed'?, 'claimed'?}` —
+сверка апстримного рапорта об авто-переключении на новую вкладку с фактическим
+`agent_focus_target_id` (issue #5529). `claim` ∈ `verified | false | mismatch | silent-open |
+silent-switch | upstream-note | none`.
+
+`browser_type` -> `{'action', 'requested_index', 'resolved_index', 'resolution'?, 'url', 'waiting', 'delta'}`.
+
+`browser_hover` -> `{'action', 'requested_index', 'resolved_index', 'resolution'?, 'point' ("x,y"),
+'rect', 'viewport', 'hit': {'hit', 'self'}, 'url', 'waiting', 'delta', 'clipped'?}`.
+Физическое `Input.dispatchMouseEvent(mouseMoved)` в точку внутри элемента — единственный
+способ включить CSS `:hover` (действия `hover` в реестре browser-use нет, issue #4964;
+синтетический `MouseEvent` из `evaluate` не двигает курсор и `:hover` не активирует).
+`hit.self` — попала ли точка в сам элемент (или его потомка/предка), то есть не перекрыт ли он.
+Точку вне вьюпорта НЕ зажимаем во вьюпорт (в отличие от апстримного клика) — это `isError`.
+
+`browser_screenshot` -> компактный JSON первым блоком + `ImageContent` вторым.
+
+`scroll` -> компактный JSON (НЕ голый текст):
+`{'upstream_report', 'action', 'scrolled': bool|None, 'status': 'scrolled'|'at-end'|'unverified',
+'scope': 'page'|'element', 'delta': {'y','x'}, 'position': {'y','x','max_y','max_x'}, 'at_end'?}`.
+Прокрутка не сдвинулась при наличии запаса -> `isError`.
+
+`switch` -> компактный JSON: `{'action', 'upstream_report', 'tab': {'focus_before','focus_after'}, 'url'}`.
+Фактический фокус не совпал с запрошенным `tab_id` -> `isError`.
+
+`select_dropdown` / `send_keys` -> компактный JSON `{'action', 'url', 'delta'}`
+(схема входа остаётся реестровой, меняется только конверт ответа).
+
+### `delta` — расписка о последствиях (issues #5137, #4758)
+
+Есть у всех действий, меняющих состояние: `browser_click`, `browser_type`, `browser_hover`,
+`select_dropdown`, `send_keys`.
+
+    {'changed': bool|None, 'status': 'changed'|'no-change'|'unavailable',
+     'cost_ms': float, 'probes': int, 'settle_ms'?: int,
+     'fields'?: {'<признак>': [до, после]},  # 'digest' печатается как строка 'changed'
+     'truncated'?: true, 'no_effect'?: true, 'note'?: str}
+
+Признаки снимаются одним `Runtime.evaluate` до и одним после: `url`, `title`, `nodes`,
+`rendered`, `interactive`, `doc` (`"HxW"`), `dialogs`, `digest`, плюс `tabs` из списка целей и
+информационные `scroll`, `active`. На вердикт `changed` НЕ влияют `scroll` и `active`: оба
+меняются от самой механики действия (`scrollIntoViewIfNeeded` перед кликом, фокус после
+`mousePressed`), а не от реакции страницы. Исключение — `send_keys`, где перевод фокуса и
+есть весь результат.
+
+Дельта НИКОГДА не поднимает ошибку: «ничего не изменилось» — законный исход клика по
+неактивной кнопке. Но если действие рапортует успех при пустой дельте, ставится
+`no_effect: true` + `note`. Пустая дельта дополнительно перепроверяется до двух раз с паузой
+120 мс (`settle_ms`) — эскалация включается только на этой ветке.
+
+Замеренная цена (headless Chrome, 2026-09-03): `cost_ms` 2.2 мс на example.com, 5.0 мс на
+arxiv.org, 21 мс на en.wikipedia.org/wiki/Main_Page (844 интерактивных элемента); в ответе
+167–208 символов, когда дельта непустая, и 455 символов вместе с `note`, когда сработал
+`no_effect`. Для сравнения: один `browser_state` на той же википедии — 40 307 символов.
 
 ## bu_mcp/resolve.py
     class StaleHandleError(Exception): ...

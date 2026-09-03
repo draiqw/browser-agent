@@ -103,7 +103,7 @@ async def main() -> int:
 				bad('more than 5 tools exposed', f'only {len(names)}')
 
 			for expected in ('browser_state', 'browser_navigate', 'browser_click', 'browser_type', 'browser_screenshot',
-							 'find_elements', 'search_page', 'scroll', 'evaluate', 'dropdown_options'):
+							 'browser_hover', 'find_elements', 'search_page', 'scroll', 'evaluate', 'dropdown_options'):
 				if expected in names:
 					ok(f'tool present: {expected}')
 				else:
@@ -291,6 +291,9 @@ async def main() -> int:
 			# --- 10. ложные успехи ----------------------------------------- #
 			await false_success_checks(session)
 
+			# --- 11. ховер и дельта ---------------------------------------- #
+			await hover_and_delta_checks(session)
+
 	await allowlist_check()
 	return report()
 
@@ -431,6 +434,113 @@ def contract_checks() -> None:
 		ok('real scroll reports the measured delta')
 	else:
 		bad('real scroll reports the measured delta', json.dumps(out)[:200])
+
+	delta_contract_checks(BuMcpServer, ToolError)
+
+
+#: Снимок дельты «до»: минимальный набор полей, которые отдаёт _DELTA_PROBE_JS.
+DELTA_BEFORE = {
+	'ok': True,
+	'url': 'https://example.com/',
+	'title': 'Example',
+	'nodes': 120,
+	'rendered': 80,
+	'interactive': 5,
+	'doc': '1200x800',
+	'scroll': '0,0',
+	'active': 'body',
+	'dialogs': 0,
+	'digest': 111111,
+	'truncated': False,
+	'tabs': 2,
+	'ms': 2.0,
+}
+
+
+def delta_contract_checks(BuMcpServer, ToolError) -> None:
+	"""Чистые проверки расписки о последствиях (issues #5137, #4758).
+
+	Живой браузер тут не нужен: сравнение двух снимков — чистая функция, а
+	интересны как раз пограничные случаи (сдвинулась только прокрутка, только
+	фокус, ничего), которые в браузере воспроизводимо не поставить.
+	"""
+	diff = getattr(BuMcpServer, '_delta_diff', None)
+	verdict = getattr(BuMcpServer, '_delta_verdict', None)
+	if diff is None or verdict is None:
+		bad('state-changing actions return a delta receipt', '_delta_diff/_delta_verdict are missing')
+		return
+
+	same = dict(DELTA_BEFORE)
+
+	# 1. Ничего не изменилось -> нет полей, нет значимости.
+	out = diff(DELTA_BEFORE, same)
+	if out['fields'] == {} and out['significant'] is False:
+		ok('delta: identical snapshots produce an empty diff')
+	else:
+		bad('delta: identical snapshots produce an empty diff', json.dumps(out)[:200])
+
+	# 2. Уехала ТОЛЬКО прокрутка -> печатается, но за реакцию страницы не считается.
+	#    click/hover сами делают scrollIntoViewIfNeeded: считай это изменением —
+	#    и детектор нооп-а не сработает никогда.
+	scrolled = {**DELTA_BEFORE, 'scroll': '0,400'}
+	out = diff(DELTA_BEFORE, scrolled)
+	if out['significant'] is False and 'scroll' in out['fields']:
+		ok('delta: scroll alone is reported but does not count as a page reaction')
+	else:
+		bad('delta: scroll alone is reported but does not count as a page reaction', json.dumps(out)[:200])
+
+	# 3. Сместился только фокус -> тоже не реакция... кроме send_keys.
+	focused = {**DELTA_BEFORE, 'active': 'input#q'}
+	out = diff(DELTA_BEFORE, focused)
+	out_keys = diff(DELTA_BEFORE, focused, ('active',))
+	if out['significant'] is False and out_keys['significant'] is True:
+		ok('delta: focus counts for send_keys and not for a click')
+	else:
+		bad('delta: focus counts for send_keys and not for a click', f'{out} / {out_keys}')
+
+	# 4. Изменился хеш дерева -> значимо, и наружу уезжает слово, а не число.
+	out = diff(DELTA_BEFORE, {**DELTA_BEFORE, 'digest': 222222})
+	if out['significant'] is True and out['fields'].get('digest') == 'changed':
+		ok('delta: a tree-digest change is significant and printed as a word')
+	else:
+		bad('delta: a tree-digest change is significant and printed as a word', json.dumps(out)[:200])
+
+	# 5. Появилась вкладка / сменился url -> значимо.
+	for key, value in (('tabs', 3), ('url', 'https://example.com/next'), ('rendered', 81), ('dialogs', 1)):
+		out = diff(DELTA_BEFORE, {**DELTA_BEFORE, key: value})
+		if out['significant'] is True and key in out['fields']:
+			ok(f'delta: a change in `{key}` is significant')
+		else:
+			bad(f'delta: a change in `{key}` is significant', json.dumps(out)[:200])
+
+	# 6. Пустая дельта при рапорте об успехе -> ФЛАГ, а не исключение.
+	try:
+		out = verdict(DELTA_BEFORE, same, probes=3, cost_ms=6.0, settle_ms=240.0, reported_ok=True)
+	except Exception as exc:  # noqa: BLE001
+		bad('delta: an empty delta is a flag, not an error', f'{type(exc).__name__}: {exc}')
+	else:
+		if out.get('no_effect') is True and out.get('changed') is False and out.get('status') == 'no-change':
+			ok('delta: an empty delta is a flag, not an error')
+		else:
+			bad('delta: an empty delta is a flag, not an error', json.dumps(out)[:200])
+		if out.get('cost_ms') == 6.0 and out.get('settle_ms') == 240 and out.get('probes') == 3:
+			ok('delta: the receipt states its own price')
+		else:
+			bad('delta: the receipt states its own price', json.dumps(out)[:200])
+
+	# 7. Дельта непустая -> флага нет.
+	out = verdict(DELTA_BEFORE, {**DELTA_BEFORE, 'rendered': 90}, probes=1, cost_ms=2.0)
+	if out.get('changed') is True and 'no_effect' not in out:
+		ok('delta: a non-empty delta clears the no-effect flag')
+	else:
+		bad('delta: a non-empty delta clears the no-effect flag', json.dumps(out)[:200])
+
+	# 8. Проба не удалась -> честное `unavailable`, а не «ничего не изменилось».
+	out = verdict({'ok': False}, {'ok': False}, probes=1, cost_ms=1.0)
+	if out.get('status') == 'unavailable' and out.get('changed') is None and 'no_effect' not in out:
+		ok('delta: a failed probe reports `unavailable`, not "nothing changed"')
+	else:
+		bad('delta: a failed probe reports `unavailable`, not "nothing changed"', json.dumps(out)[:200])
 
 
 async def false_success_checks(session) -> None:
@@ -617,6 +727,231 @@ async def false_success_checks(session) -> None:
 			ok('false-success run cleaned up its tabs', f'{closed}')
 		else:
 			bad('false-success run cleaned up its tabs', f'{closed}/{len(mine)}')
+
+
+# --------------------------------------------------------------------------- #
+# [11] Ховер (issue #4964) и расписка о последствиях (issues #5137, #4758)
+# --------------------------------------------------------------------------- #
+
+#: Синтетическая страница: #hoverMenu показывается ТОЛЬКО правилом
+#: `#hoverHost:hover #hoverMenu{display:block}`. Никакого JS-обработчика на
+#: наведение нет намеренно — иначе тест доказывал бы не то: с обработчиком
+#: элемент проявился бы и от синтетического MouseEvent, и разницы между
+#: настоящим движением курсора и подделкой было бы не видно.
+HOVER_PAGE_JS = (
+	"(function(){document.body.innerHTML='';"
+	"var st=document.createElement('style');st.id='hoverStyle';"
+	"st.textContent='#hoverHost{width:220px;height:60px;background:#eee;margin:40px}'"
+	"+'#hoverMenu{display:none;width:150px;height:80px;background:#0a0}'"
+	"+'#hoverHost:hover #hoverMenu{display:block}';"
+	"document.head.appendChild(st);"
+	"var host=document.createElement('div');host.id='hoverHost';host.setAttribute('role','button');"
+	"host.tabIndex=0;host.textContent='HOVER ME';"
+	"var menu=document.createElement('div');menu.id='hoverMenu';menu.textContent='HOVER ONLY MENU';"
+	"host.appendChild(menu);document.body.appendChild(host);return 'built'})()"
+)
+
+#: Видим ли элемент, который проявляется только по :hover.
+HOVER_VISIBLE_JS = (
+	"(function(){var m=document.getElementById('hoverMenu');"
+	"return m?String(m.offsetParent!==null||m.getClientRects().length>0):'missing'})()"
+)
+
+#: Контрольный негатив: ровно то, чем ховер пытаются подделать из JS.
+#: Синтетическое событие не двигает внутреннюю позицию мыши браузера, поэтому
+#: CSS :hover не включается — и меню не появляется.
+HOVER_SYNTHETIC_JS = (
+	"(function(){var h=document.getElementById('hoverHost');"
+	"['mouseover','mouseenter','mousemove','pointerover','pointerenter'].forEach(function(t){"
+	"h.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window,clientX:100,clientY:80}))});"
+	"return 'dispatched'})()"
+)
+
+
+async def hover_and_delta_checks(session) -> None:
+	"""Живые проверки browser_hover и дельты в собственной вкладке."""
+	print('\n[11] browser_hover (#4964) + delta receipt (#5137, #4758)')
+	before_ids = {t['tab_id'] for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])}
+	res = await session.call_tool('browser_navigate', {'url': 'https://example.com', 'new_tab': True})
+	if res.isError:
+		bad('hover run opened its own tab', text_of(res)[:160])
+		return
+	ours = {t['tab_id'] for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])} - before_ids
+
+	async def ev(code: str) -> str:
+		return text_of(await session.call_tool('evaluate', {'code': code}))
+
+	try:
+		await ev(HOVER_PAGE_JS)
+
+		# 1. baseline: меню спрятано
+		visible = await ev(HOVER_VISIBLE_JS)
+		print(f'  baseline visible={visible.strip()!r}')
+		if 'false' in visible.lower():
+			ok('hover-only element starts hidden')
+		else:
+			bad('hover-only element starts hidden', visible[:120])
+			return
+
+		# 2. КОНТРОЛЬНЫЙ НЕГАТИВ: синтетический MouseEvent :hover не включает
+		await ev(HOVER_SYNTHETIC_JS)
+		visible = await ev(HOVER_VISIBLE_JS)
+		print(f'  after synthetic MouseEvent visible={visible.strip()!r}')
+		if 'false' in visible.lower():
+			ok('a synthetic MouseEvent does NOT trigger CSS :hover (control)')
+		else:
+			bad('a synthetic MouseEvent does NOT trigger CSS :hover (control)', visible[:120])
+
+		# 3. browser_hover: настоящее движение курсора через CDP
+		host_index = await index_of(session, 'id=hoverHost')
+		if host_index is None:
+			bad('hover host shows up in browser_state')
+			return
+		res = await session.call_tool('browser_hover', {'index': host_index})
+		body = text_of(res)
+		print(f'  browser_hover -> isError={res.isError} {body[:260]}')
+		if res.isError:
+			bad('browser_hover on a live index', body[:240])
+			return
+		payload = as_json(body)
+		visible = await ev(HOVER_VISIBLE_JS)
+		print(f'  after browser_hover visible={visible.strip()!r}')
+		if 'true' in visible.lower():
+			ok('browser_hover DOES trigger CSS :hover (hover-only element became visible)')
+		else:
+			bad('browser_hover DOES trigger CSS :hover (hover-only element became visible)', visible[:120])
+
+		hit = payload.get('hit') or {}
+		if hit.get('self') is True:
+			ok('browser_hover confirms the pointer landed on the element', f'hit={hit.get("hit")}')
+		else:
+			bad('browser_hover confirms the pointer landed on the element', json.dumps(hit)[:160])
+
+		delta = payload.get('delta') or {}
+		if delta.get('changed') is True and 'rendered' in (delta.get('fields') or {}):
+			ok('hover delta measures the reveal', json.dumps(delta.get('fields'))[:80])
+		else:
+			bad('hover delta measures the reveal', json.dumps(delta)[:200])
+		if isinstance(delta.get('cost_ms'), (int, float)):
+			ok('delta states its measured cost', f'{delta["cost_ms"]}ms, {delta.get("probes")} probe(s)')
+		else:
+			bad('delta states its measured cost', json.dumps(delta)[:160])
+
+		# 4. Навести некуда -> ЖЁСТКАЯ ошибка, а не зажим точки во вьюпорт.
+		#    Апстримный клик здесь делает max(0, min(viewport-1, center)) и тычет
+		#    в случайный видимый пиксель; для наведения это тихий ложный успех.
+		await ev(
+			"(function(){var b=document.createElement('button');b.id='offBtn';b.textContent='OFFSCREEN';"
+			"document.body.prepend(b);return 'ok'})()"
+		)
+		off_index = await index_of(session, 'id=offBtn')
+		if off_index is None:
+			bad('offscreen probe button shows up in browser_state')
+		else:
+			await ev(
+				"(function(){document.getElementById('offBtn').style.cssText="
+				"'position:fixed;left:-9999px;top:-9999px';return 'moved'})()"
+			)
+			res = await session.call_tool('browser_hover', {'index': off_index})
+			body = text_of(res)
+			print(f'  hover offscreen -> isError={res.isError} {body[:160]}')
+			if res.isError and 'outside the' in body and 'Refusing to clamp' in body:
+				ok('hovering something outside the viewport is a hard error, not a clamped guess')
+			else:
+				bad('hovering something outside the viewport is a hard error, not a clamped guess', body[:200])
+
+		# 5. Мёртвый индекс -> та же жёсткая ошибка, что у browser_click.
+		res = await session.call_tool('browser_hover', {'index': 999999})
+		body = text_of(res)
+		if res.isError and 'stale' in body.lower() and 'nothing was hovered' in body.lower():
+			ok('browser_hover on a dead index is a hard error and says nothing was hovered')
+		else:
+			bad('browser_hover on a dead index is a hard error and says nothing was hovered', body[:200])
+
+		# 6. Дельта на живом клике: кнопка без обработчика -> ПУСТО + флаг.
+		await ev(
+			"(function(){document.body.innerHTML='';"
+			"var a=document.createElement('button');a.id='inertBtn';a.textContent='INERT';"
+			"var b=document.createElement('button');b.id='liveBtn';b.textContent='LIVE';"
+			"b.onclick=function(){var d=document.createElement('p');d.id='grew';d.textContent='grew';"
+			"document.body.appendChild(d)};document.body.append(a,b);return 'ok'})()"
+		)
+		inert_index = await index_of(session, 'id=inertBtn')
+		live_btn_index = await index_of(session, 'id=liveBtn')
+		if inert_index is None or live_btn_index is None:
+			bad('delta probe buttons show up in browser_state')
+		else:
+			res = await session.call_tool('browser_click', {'index': inert_index})
+			body = text_of(res)
+			delta = (as_json(body).get('delta') or {})
+			print(f'  click inert -> delta={json.dumps(delta)[:220]}')
+			if res.isError:
+				bad('a click that changes nothing is NOT an error', body[:200])
+			else:
+				ok('a click that changes nothing is NOT an error')
+			if delta.get('no_effect') is True and delta.get('changed') is False:
+				ok('a click that changes nothing is flagged no_effect')
+			else:
+				bad('a click that changes nothing is flagged no_effect', json.dumps(delta)[:220])
+			if delta.get('probes', 0) > 1:
+				ok('an empty delta escalates to extra probes', f'probes={delta.get("probes")}')
+			else:
+				bad('an empty delta escalates to extra probes', json.dumps(delta)[:200])
+
+			res = await session.call_tool('browser_click', {'index': live_btn_index})
+			body = text_of(res)
+			delta = (as_json(body).get('delta') or {})
+			print(f'  click live -> delta={json.dumps(delta)[:220]}')
+			if delta.get('changed') is True and 'no_effect' not in delta:
+				ok('a click that changes the page is not flagged')
+			else:
+				bad('a click that changes the page is not flagged', json.dumps(delta)[:220])
+			if delta.get('probes') == 1:
+				ok('a delta that changed does not pay for extra probes')
+			else:
+				bad('a delta that changed does not pay for extra probes', json.dumps(delta)[:200])
+
+		# 7. send_keys / select_dropdown теперь тоже отдают конверт с дельтой.
+		res = await session.call_tool('send_keys', {'keys': 'Tab'})
+		payload = as_json(text_of(res))
+		if not res.isError and 'delta' in payload and 'action' in payload:
+			ok('send_keys returns the delta envelope')
+		else:
+			bad('send_keys returns the delta envelope', text_of(res)[:200])
+
+		await ev(
+			"(function(){var s=document.createElement('select');s.id='deltaSel';"
+			"s.setAttribute('aria-label','delta select');['one','two'].forEach(function(t){"
+			"var o=document.createElement('option');o.textContent=t;o.value=t;s.appendChild(o)});"
+			"document.body.prepend(s);return 'ok'})()"
+		)
+		sel_index = await index_of(session, 'id=deltaSel')
+		if sel_index is None:
+			bad('delta probe <select> shows up in browser_state')
+		else:
+			res = await session.call_tool('select_dropdown', {'index': sel_index, 'text': 'two'})
+			payload = as_json(text_of(res))
+			print(f'  select_dropdown -> {json.dumps(payload)[:220]}')
+			if not res.isError and 'delta' in payload:
+				ok('select_dropdown returns the delta envelope')
+			else:
+				bad('select_dropdown returns the delta envelope', text_of(res)[:200])
+			if (payload.get('delta') or {}).get('changed') is True:
+				ok('select_dropdown delta sees the changed selection')
+			else:
+				bad('select_dropdown delta sees the changed selection', json.dumps(payload.get('delta'))[:200])
+	finally:
+		tabs = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
+		mine = [t for t in tabs if t['tab_id'] in ours]
+		closed = 0
+		for tab in mine:
+			cl = await session.call_tool('close', {'tab_id': str(tab['tab_id'])})
+			closed += 0 if cl.isError else 1
+		print(f'  cleanup: closed {closed}/{len(mine)} of our tabs')
+		if mine and closed == len(mine):
+			ok('hover run cleaned up its tabs', f'{closed}')
+		else:
+			bad('hover run cleaned up its tabs', f'{closed}/{len(mine)}')
 
 
 async def index_of(session, needle: str) -> int | None:

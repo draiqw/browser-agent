@@ -25,12 +25,22 @@ if/elif-дispatcher'ом. Наружу из браузерных примити�
   ``bu_mcp.resolve.resolve_index``; протухший или неоднозначный хендл прилетает
   клиенту ЖЁСТКОЙ ошибкой MCP (``isError=True``), а не мягким «page may have
   changed». После действия — ``wait_for_page_ready``, разбивка стадий в ответе.
+* ``browser_hover``      — действия ``hover`` в реестре browser-use НЕТ ВООБЩЕ
+  (issue #4964), а обойтись ``evaluate`` нельзя: синтетический
+  ``dispatchEvent(new MouseEvent('mouseover'))`` не двигает внутреннюю позицию
+  мыши браузера, поэтому CSS ``:hover`` не включается и весь класс интерфейсов
+  «показывается только по наведению» (меню, кнопки в строке списка, тултипы,
+  мега-меню) остаётся недоступен. Здесь — настоящий ``Input.dispatchMouseEvent``
+  типа ``mouseMoved`` в точку внутри элемента, с резолвом индекса как у
+  ``browser_click`` и с CDP-сессией фрейма (для кросс-доменных iframe координаты
+  фрейм-локальные). Точку вне вьюпорта, в отличие от апстримного клика, НЕ
+  зажимаем во вьюпорт — это честная ошибка, а не наведение на случайный пиксель.
 * ``browser_screenshot`` — даунскейл до ``max_dim`` (по умолчанию 1024). Размеры
   берутся из PNG и из закешированного состояния; ``get_browser_state_summary()``
   ради них не вызывается — штатный сервер из-за этого перестраивает весь DOM и
   снимает второй кадр.
 
-Плюс два реестровых действия проходят через верификацию (схема у них остаётся
+Плюс четыре реестровых действия проходят через верификацию (схема у них остаётся
 реестровой, подменяется только доверие к их рапорту):
 
 * ``scroll``  — позиция прокрутки снимается ДО и ПОСЛЕ. У browser-use текстового
@@ -41,6 +51,20 @@ if/elif-дispatcher'ом. Наружу из браузерных примити�
   статус ``at-end`` (см. ``_tool_scroll``).
 * ``switch``  — фактический ``agent_focus_target_id`` после переключения
   сверяется с запрошенным ``tab_id``.
+* ``select_dropdown`` / ``send_keys`` — конверт ответа заменён на JSON с
+  ``delta`` (см. ниже): оба меняют состояние и оба умеют «выполниться» вхолостую.
+
+И ещё одно общее — РАСПИСКА О ПОСЛЕДСТВИЯХ (issues #5137, #4758). Каждое
+действие, меняющее состояние (``browser_click``, ``browser_type``,
+``browser_hover``, ``select_dropdown``, ``send_keys``), возвращает ключ ``delta``:
+что фактически изменилось на странице между «до» и «после». Это третий класс
+отказов, который не видят ни ``error``, ни ``NOOP_MARKERS``: клик прошёл, но
+ничего не произошло — оверлей перехватил, валидация формы заблокировала,
+обработчик молча вышел. Дельта сама по себе ошибку НЕ поднимает («ничего не
+изменилось» — законный исход клика по неактивной кнопке), но если действие
+рапортует успех при пустой дельте, ставится флаг ``no_effect``. Цена — один
+``Runtime.evaluate`` до и один после (~2-6 мс, ~40-90 символов в ответе);
+подробности и вторая ступень — у ``_DELTA_PROBE_JS`` и ``_delta_end``.
 
 И общее для ВСЕХ действий: ``_action_result_text`` проверяет ``ActionResult`` не
 только на ``error``, но и по таблице ``NOOP_MARKERS`` — шесть мест browser-use
@@ -81,6 +105,7 @@ import json
 import logging
 import re
 import tempfile
+import time
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -346,6 +371,141 @@ _SCROLL_TARGET_JS = """function () {
 
 
 # --------------------------------------------------------------------------- #
+# browser_hover: физическое наведение курсора
+# --------------------------------------------------------------------------- #
+
+#: Что реально лежит под точкой наведения. Считается ПОСЛЕ mouseMoved, в системе
+#: координат того же фрейма, что и квад (для OOPIF она фрейм-локальная — поэтому
+#: и функция выполняется через ``Runtime.callFunctionOn`` на самом узле, а не
+#: глобальным ``Runtime.evaluate`` в корневом документе).
+#:
+#: ``self`` истинно, если точка попала в сам элемент или в его потомка/предка —
+#: то есть CSS ``:hover`` на нашем элементе гарантированно активен (он ставится
+#: на всю цепочку предков попавшего узла).
+_HOVER_HIT_JS = """function (x, y) {
+  const el = document.elementFromPoint(x, y);
+  if (!el) return { hit: null, self: false };
+  const name = el.tagName.toLowerCase() + (el.id ? '#' + el.id : '');
+  return { hit: name, self: el === this || this.contains(el) || el.contains(this) };
+}"""
+
+#: Секунды между двумя mouseMoved. Первый ставит внутреннюю позицию мыши, второй
+#: даёт странице ещё один `mousemove` УЖЕ ВНУТРИ элемента: hover-intent-обвязки
+#: (мега-меню, тултипы с задержкой) слушают именно движение внутри, а не вход.
+HOVER_MOVE_GAP = 0.04
+
+
+# --------------------------------------------------------------------------- #
+# Дельта: что фактически изменилось на странице
+# --------------------------------------------------------------------------- #
+
+#: Один Runtime.evaluate, один принудительный layout, один проход по дереву.
+#:
+#: Зачем вообще. ``error`` и ``NOOP_MARKERS`` ловят два класса отказов: явную
+#: ошибку и известный текст-нооп. Третий они не видят в принципе — «действие
+#: выполнено, но ничего не произошло»: оверлей перехватил клик, валидация формы
+#: заблокировала сабмит, обработчик молча вышел. У browser-use в этом случае
+#: результат дословно такой же, как у сработавшего клика.
+#:
+#: Почему это дёшево. Дорогая часть снятия состояния — не обход DOM, а сериализация
+#: (accessibility-дерево, атрибуты, геометрия каждого узла, текст) и её перегон по
+#: проводу. Здесь по проводу едет ~10 скаляров, а весь обход схлопывается в одно
+#: число. Прецедент в этом же файле — ``_SCROLL_PROBE_JS``, который так же гоняет
+#: цикл по всем элементам.
+#:
+#: Почему offsetLeft/offsetTop, а не getBoundingClientRect: они считаются от
+#: offsetParent, а не от вьюпорта, поэтому ПРОКРУТКА их не меняет. Это принципиально:
+#: ``click``/``hover`` сами по себе делают ``scrollIntoViewIfNeeded``, и на
+#: bounding-rect дельта была бы непустой после любого действия — детектор нооп-а
+#: перестал бы работать ровно там, ради чего написан.
+#:
+#: Почему в digest входят value/selectedIndex/checked/disabled/open/aria-expanded:
+#: ровно эти изменения не меняют ни числа узлов, ни геометрии (ввод в поле,
+#: чекбокс, выбор в ``<select>``, раскрытие аккордеона на CSS), а «ничего не
+#: изменилось» после них было бы ложью. ``value`` берётся не длиной, а длиной плюс
+#: первым и последним символом: ``select_dropdown`` с 'one' на 'two' длину не
+#: меняет, и на одной длине дельта была бы пустой (поймано тестом в smoke.py).
+_DELTA_PROBE_JS = """(() => {
+  const LIMIT = 20000;
+  const se = document.scrollingElement || document.documentElement || document.body;
+  const nodes = document.getElementsByTagName('*');
+  const total = nodes.length;
+  const n = Math.min(total, LIMIT);
+  const INTER = { A: 1, BUTTON: 1, INPUT: 1, SELECT: 1, TEXTAREA: 1, SUMMARY: 1, DETAILS: 1 };
+  let digest = 0, rendered = 0, interactive = 0;
+  for (let i = 0; i < n; i++) {
+    const el = nodes[i];
+    const w = el.offsetWidth | 0, h = el.offsetHeight | 0;
+    const shown = (w || h || el.getClientRects().length) ? 1 : 0;
+    if (shown) rendered++;
+    const tag = el.tagName;
+    if (INTER[tag] === 1) interactive++;
+    let v = tag.length * 131 + tag.charCodeAt(0);
+    if (shown) v += (el.offsetLeft | 0) * 3 + (el.offsetTop | 0) * 5 + w * 11 + h * 13;
+    const cn = el.className;
+    if (typeof cn === 'string') v += cn.length * 17;
+    if (typeof el.value === 'string') {
+      const s = el.value;
+      v += s.length * 19 + (s.charCodeAt(0) | 0) * 3 + (s.charCodeAt(s.length - 1) | 0) * 7;
+    }
+    if (typeof el.selectedIndex === 'number') v += (el.selectedIndex + 2) * 43;
+    if (el.checked) v += 23;
+    if (el.disabled) v += 29;
+    if (el.open) v += 31;
+    const ae = el.getAttribute('aria-expanded');
+    if (ae) v += ae === 'true' ? 37 : 41;
+    digest = (digest + (i + 1) * (v | 0)) % 2147483647;
+  }
+  const a = document.activeElement;
+  return {
+    url: location.href,
+    title: document.title || '',
+    nodes: total,
+    rendered: rendered,
+    interactive: interactive,
+    doc: (se ? Math.round(se.scrollHeight) : 0) + 'x' + (se ? Math.round(se.scrollWidth) : 0),
+    scroll: (se ? Math.round(se.scrollLeft) : 0) + ',' + (se ? Math.round(se.scrollTop) : 0),
+    active: a ? a.tagName.toLowerCase() + (a.id ? '#' + a.id : '') : '',
+    dialogs: document.querySelectorAll('dialog[open],[role=dialog],[role=alertdialog]').length,
+    digest: digest,
+    truncated: total > LIMIT,
+  };
+})()"""
+
+#: Признаки, изменение которых означает «страница отреагировала».
+#:
+#: ``scroll`` и ``active`` сюда СОЗНАТЕЛЬНО не входят, хотя и печатаются: и то и
+#: другое меняется от самой механики действия (``scrollIntoViewIfNeeded`` перед
+#: кликом, фокус после mousePressed на любом фокусируемом узле) и происходит
+#: одинаково что при сработавшем обработчике, что при съеденном оверлеем клике.
+#: Считать их за реакцию страницы — значит выключить детектор нооп-а.
+DELTA_SIGNIFICANT: tuple[str, ...] = (
+	'url',
+	'tabs',
+	'title',
+	'nodes',
+	'rendered',
+	'interactive',
+	'doc',
+	'dialogs',
+	'digest',
+)
+
+#: Информационные признаки: печатаются, но на вердикт не влияют — кроме точечных
+#: исключений (``BuMcpServer.DELTA_FOCUS_COUNTS``: для ``send_keys`` перевод
+#: фокуса — это и есть весь результат действия).
+DELTA_INFORMATIONAL: tuple[str, ...] = ('scroll', 'active')
+
+#: Сколько раз перепроверить «ничего не изменилось» и с какой паузой.
+#: Эскалация включается ТОЛЬКО на подозрительной ветке (действие рапортует успех,
+#: а дельта пуста) — там, где ошибка стоит дороже всего: клиент иначе считает
+#: задачу решённой. На ветке «что-то изменилось» доплачивать не за что, ответ уже
+#: получен, поэтому там ровно две пробы на весь вызов.
+DELTA_RECHECKS = 2
+DELTA_RECHECK_DELAY = 0.12
+
+
+# --------------------------------------------------------------------------- #
 # Ленивая загрузка наших модулей
 # --------------------------------------------------------------------------- #
 
@@ -419,6 +579,18 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 		},
 		'required': ['index', 'text'],
 	},
+	'browser_hover': {
+		'type': 'object',
+		'properties': {
+			'index': {'type': 'integer', 'minimum': 1, 'description': 'Element index from browser_state.'},
+			'timeout': {
+				'type': 'number',
+				'default': 3.0,
+				'description': 'Seconds to wait for the page to settle after the pointer lands (menus, tooltips).',
+			},
+		},
+		'required': ['index'],
+	},
 	'browser_screenshot': {
 		'type': 'object',
 		'properties': {
@@ -454,6 +626,14 @@ _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 	'browser_type': (
 		'Type text into the element with this index from browser_state. Same hard index resolution '
 		'as browser_click. Waits for the page to settle afterwards.'
+	),
+	'browser_hover': (
+		'Move the real mouse pointer onto the element with this index and leave it there. This is a '
+		'physical CDP pointer move, so CSS :hover fires and hover-only UI actually appears: dropdown '
+		'menus, row action buttons, tooltips, mega-menus. Dispatching a synthetic MouseEvent from '
+		'JavaScript does NOT do this — it never moves the browser pointer, so :hover stays off. If the '
+		'element cannot be brought into the viewport, the call FAILS instead of pointing somewhere else. '
+		'Returns what is actually under the pointer and what changed on the page.'
 	),
 	'browser_screenshot': (
 		'PNG screenshot of the current viewport, downscaled so its longest side is at most max_dim.'
@@ -960,21 +1140,28 @@ class BuMcpServer:
 
 	# --- резолв индекса ---------------------------------------------------- #
 
-	async def _resolve(self, session: BrowserSession, index: int) -> tuple[int, dict[str, Any]]:
-		"""Индекс -> живой индекс. Протухший/неоднозначный хендл = жёсткая ошибка."""
+	async def _resolve(
+		self, session: BrowserSession, index: int, *, what: str = 'clicked or typed'
+	) -> tuple[Any, int, dict[str, Any]]:
+		"""Индекс -> (узел, живой индекс, телеметрия). Протухший/неоднозначный хендл = жёсткая ошибка.
+
+		Узел возвращается наружу ради ``browser_hover``: тому нужен не индекс, а
+		``backend_node_id`` и CDP-сессия ФРЕЙМА этого узла — координаты квада
+		фрейм-локальные, и слать их в корневую сессию нельзя.
+		"""
 		resolve_mod = _bu_mcp('resolve')
 		try:
 			node = await resolve_mod.resolve_index(session, index)
 		except resolve_mod.StaleHandleError as exc:
 			raise ToolError(
 				f'STALE ELEMENT HANDLE [{index}]: {exc} '
-				f'Nothing was clicked or typed. Call browser_state to get a fresh snapshot '
+				f'Nothing was {what}. Call browser_state to get a fresh snapshot '
 				f'and use an index from it.'
 			) from exc
 		except resolve_mod.AmbiguousHandleError as exc:
 			raise ToolError(
 				f'AMBIGUOUS ELEMENT HANDLE [{index}]: {exc} '
-				f'Refusing to guess which element you meant; nothing was clicked or typed. '
+				f'Refusing to guess which element you meant; nothing was {what}. '
 				f'Call browser_state and pick a specific index.'
 			) from exc
 		except ToolError:
@@ -990,7 +1177,339 @@ class BuMcpServer:
 				info['resolution'] = last
 		except Exception:  # noqa: BLE001
 			pass
-		return live_index, info
+		return node, live_index, info
+
+	# --- дельта: что фактически изменилось --------------------------------- #
+
+	async def _delta_capture(self, session: BrowserSession) -> dict[str, Any]:
+		"""Один дешёвый снимок признаков страницы. Fail-open: ``{'ok': False}``."""
+		try:
+			value = await asyncio.wait_for(self._evaluate(session, _DELTA_PROBE_JS), timeout=3.0)
+		except Exception:  # noqa: BLE001
+			return {'ok': False}
+		if not isinstance(value, dict):
+			return {'ok': False}
+		return {'ok': True, **value}
+
+	async def _delta_start(self, session: BrowserSession, *, tabs: dict[str, Any] | None = None) -> dict[str, Any]:
+		"""Снимок ДО действия. Число вкладок берётся из готового снимка, если он уже есть."""
+		started = time.perf_counter()
+		snap = await self._delta_capture(session)
+		if tabs is None:
+			tabs = await self._tab_snapshot(session)
+		snap['tabs'] = len(tabs.get('ids') or [])
+		snap['ms'] = (time.perf_counter() - started) * 1000.0
+		return snap
+
+	async def _delta_end(
+		self,
+		session: BrowserSession,
+		before: dict[str, Any],
+		*,
+		tabs: dict[str, Any] | None = None,
+		reported_ok: bool = True,
+		extra_significant: tuple[str, ...] = (),
+	) -> dict[str, Any]:
+		"""Снимок ПОСЛЕ + вердикт. Лестница из двух ступеней.
+
+		Ступень 1 (всегда): один ``Runtime.evaluate``. Если он показал изменение —
+		вопрос закрыт, доплачивать не за что.
+
+		Ступень 2 (только если ступень 1 показала ПУСТУЮ дельту, а действие
+		отрапортовало успех): та же проба ещё до ``DELTA_RECHECKS`` раз с паузой
+		``DELTA_RECHECK_DELAY``. Это и есть подъём цены — но ровно на той ветке,
+		где он окупается: «сразу ничего не изменилось» бывает у нормального клика,
+		который дёрнул fetch и перерисуется через 100 мс, а вот «не изменилось и
+		после того, как страница успокоилась» — это уже настоящий нооп.
+
+		Чего здесь СОЗНАТЕЛЬНО нет. Напрашивающаяся третья ступень — сравнить
+		полное дерево из ``state.serialize_state`` до и после — нереализуема без
+		того, чтобы платить за неё ВСЕГДА: сторону «до» нельзя снять задним
+		числом, а предсказать, понадобится ли она, невозможно. Это ровно то
+		удвоение цены самого дорогого вызова, которого мы избегаем. Поэтому
+		ступень 1 сделана достаточно чувствительной (геометрия + состояние формы
+		+ признак отрисованности каждого узла), а не поверхностной.
+		"""
+		started = time.perf_counter()
+		if tabs is None:
+			tabs = await self._tab_snapshot(session)
+		tabs_after = len(tabs.get('ids') or [])
+
+		after = await self._delta_capture(session)
+		after['tabs'] = tabs_after
+		probes, settled = 1, 0.0
+		if before.get('ok') and after.get('ok') and reported_ok:
+			while probes <= DELTA_RECHECKS and not self._delta_diff(before, after, extra_significant)['significant']:
+				await asyncio.sleep(DELTA_RECHECK_DELAY)
+				settled += DELTA_RECHECK_DELAY * 1000.0
+				fresh = await self._delta_capture(session)
+				probes += 1
+				if not fresh.get('ok'):
+					break
+				fresh['tabs'] = tabs_after
+				after = fresh
+
+		cost = float(before.get('ms') or 0.0) + (time.perf_counter() - started) * 1000.0 - settled
+		return self._delta_verdict(
+			before,
+			after,
+			probes=probes,
+			cost_ms=cost,
+			settle_ms=settled,
+			reported_ok=reported_ok,
+			extra_significant=extra_significant,
+		)
+
+	@staticmethod
+	def _delta_diff(
+		before: dict[str, Any], after: dict[str, Any], extra_significant: tuple[str, ...] = ()
+	) -> dict[str, Any]:
+		"""Чистое сравнение двух снимков -> изменившиеся поля + флаг значимости."""
+
+		def show(key: str, value: Any) -> Any:
+			if key == 'digest':
+				return 'changed'
+			if isinstance(value, str) and len(value) > 100:
+				return value[:99] + '…'
+			return value
+
+		counts = set(DELTA_SIGNIFICANT) | set(extra_significant)
+		fields: dict[str, Any] = {}
+		significant = False
+		for key in DELTA_SIGNIFICANT + DELTA_INFORMATIONAL:
+			if key not in before or key not in after:
+				continue
+			if before[key] == after[key]:
+				continue
+			fields[key] = [show(key, before[key]), show(key, after[key])] if key != 'digest' else 'changed'
+			if key in counts:
+				significant = True
+		return {'fields': fields, 'significant': significant}
+
+	@classmethod
+	def _delta_verdict(
+		cls,
+		before: dict[str, Any],
+		after: dict[str, Any],
+		*,
+		probes: int,
+		cost_ms: float,
+		settle_ms: float = 0.0,
+		reported_ok: bool = True,
+		extra_significant: tuple[str, ...] = (),
+	) -> dict[str, Any]:
+		"""Расписка о последствиях. НИКОГДА не бросает: пустая дельта — законный исход.
+
+		«Ничего не изменилось» после клика по неактивной кнопке или по уже
+		выбранному пункту — нормальный, честный результат, и превращать его в
+		``ToolError`` значило бы ломать рабочие сценарии. Но и молчать нельзя:
+		если действие отрапортовало успех, а на странице не сдвинулось ничего,
+		модель по одному только тексту действия решит, что задача выполнена.
+		Поэтому ставится явный флаг ``no_effect`` с объяснением, а не ошибка.
+		"""
+		payload: dict[str, Any] = {'cost_ms': round(cost_ms, 1), 'probes': probes}
+		if settle_ms:
+			payload['settle_ms'] = round(settle_ms)
+		if not (before.get('ok') and after.get('ok')):
+			payload.update(
+				changed=None,
+				status='unavailable',
+				note='Could not read page state before/after (CDP probe failed); nothing was verified.',
+			)
+			return payload
+
+		diff = cls._delta_diff(before, after, extra_significant)
+		payload['changed'] = bool(diff['significant'])
+		payload['status'] = 'changed' if diff['significant'] else 'no-change'
+		if diff['fields']:
+			payload['fields'] = diff['fields']
+		if before.get('truncated') or after.get('truncated'):
+			payload['truncated'] = True
+
+		if not diff['significant'] and reported_ok:
+			payload['no_effect'] = True
+			payload['note'] = (
+				f'Reported success, but NOTHING measurably changed after {probes} probe(s): same URL, '
+				f'tab count, rendered elements, layout and form state. The action may have been swallowed '
+				f'(overlay, form validation, a handler that returned early). Do not treat this step as done '
+				f'without checking browser_state.'
+			)
+		return payload
+
+	# --- browser_hover ------------------------------------------------------ #
+
+	async def _hover_point(self, session: BrowserSession, node: Any, index: int) -> dict[str, Any]:
+		"""Куда физически везти курсор. Некуда — ЖЁСТКАЯ ошибка, а не «куда-нибудь».
+
+		Геометрия берётся тем же путём, что у клика в
+		``browser_use/browser/watchdogs/default_action_watchdog.py``:
+		CDP-сессия ФРЕЙМА узла (``cdp_client_for_node`` — для кросс-доменного
+		iframe координаты фрейм-локальные и в корневую сессию их слать нельзя),
+		``DOM.scrollIntoViewIfNeeded``, затем ``get_element_coordinates``
+		(getContentQuads -> getBoxModel -> getBoundingClientRect).
+
+		Где мы РАСХОДИМСЯ с апстримом, намеренно:
+
+		* апстрим при пустой геометрии падает в ``element.click()`` из JS. Для
+		  наведения такой фолбэк бессмысленен: синтетическое событие не двигает
+		  внутреннюю позицию мыши, ``:hover`` не включается — это и есть тот самый
+		  тихий ложный успех, ради отсутствия которого написан весь сервер;
+		* апстрим при точке вне вьюпорта делает
+		  ``center = max(0, min(viewport - 1, center))`` — молча зажимает и кликает
+		  по СЛУЧАЙНОМУ видимому пикселю, который к элементу отношения не имеет.
+		  Здесь вместо зажима считается ПЕРЕСЕЧЕНИЕ прямоугольника элемента с
+		  вьюпортом, и точка берётся в его центре: она по построению лежит и
+		  внутри элемента, и внутри вьюпорта. Пересечение пустое — ошибка.
+		"""
+		try:
+			cdp_session = await session.cdp_client_for_node(node)
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'hover on [{index}] failed: no CDP session for the element frame ({exc}).') from exc
+		session_id = cdp_session.session_id
+		backend_node_id = node.backend_node_id
+
+		metrics = await cdp_session.cdp_client.send.Page.getLayoutMetrics(session_id=session_id)
+		vw = float(metrics['layoutViewport']['clientWidth'])
+		vh = float(metrics['layoutViewport']['clientHeight'])
+
+		scrolled = True
+		try:
+			await cdp_session.cdp_client.send.DOM.scrollIntoViewIfNeeded(
+				params={'backendNodeId': backend_node_id}, session_id=session_id
+			)
+			await asyncio.sleep(0.05)
+		except Exception:  # noqa: BLE001
+			scrolled = False
+
+		rect = await session.get_element_coordinates(backend_node_id, cdp_session)
+		if rect is None:
+			raise ToolError(
+				f'Cannot hover [{index}]: the element has NO geometry (getContentQuads, getBoxModel and '
+				f'getBoundingClientRect all came back empty), so there is no point to move the pointer to. '
+				f'It is display:none, detached, or zero-sized. Nothing was hovered. Note that a JavaScript '
+				f'fallback would not help: a synthetic MouseEvent does not move the browser pointer and '
+				f'does not trigger CSS :hover.'
+			)
+
+		x, y, w, h = float(rect.x), float(rect.y), float(rect.width), float(rect.height)
+		if w <= 0 or h <= 0:
+			raise ToolError(
+				f'Cannot hover [{index}]: the element measures {w:g}x{h:g} px. There is nothing to point at. '
+				f'Nothing was hovered.'
+			)
+
+		vx0, vy0 = max(0.0, x), max(0.0, y)
+		vx1, vy1 = min(vw, x + w), min(vh, y + h)
+		if vx1 - vx0 < 1.0 or vy1 - vy0 < 1.0:
+			raise ToolError(
+				f'Cannot hover [{index}]: the element sits at ({x:g}, {y:g}) {w:g}x{h:g} px, entirely '
+				f'outside the {vw:g}x{vh:g} viewport'
+				+ ('' if scrolled else ' (scrollIntoViewIfNeeded failed too)')
+				+ '. Nothing was hovered. Refusing to clamp the pointer back into the viewport: that is '
+				'what browser-use does for clicks, and it means pointing at an arbitrary visible pixel that '
+				'belongs to some other element. Scroll the element into view first, or resize the viewport.'
+			)
+
+		point = {'x': (vx0 + vx1) / 2.0, 'y': (vy0 + vy1) / 2.0}
+		# Второй mouseMoved — движение ВНУТРИ элемента, на пиксель в сторону, но не
+		# за пределы видимой части.
+		point['x2'] = min(vx1 - 0.5, point['x'] + 1.0)
+		point['y2'] = min(vy1 - 0.5, point['y'] + 1.0)
+		point['viewport'] = f'{vw:g}x{vh:g}'
+		point['rect'] = f'{x:g},{y:g} {w:g}x{h:g}'
+		point['clipped'] = bool(x < 0 or y < 0 or x + w > vw or y + h > vh)
+		return {'cdp': cdp_session, 'session_id': session_id, 'backend_node_id': backend_node_id, 'point': point}
+
+	async def _tool_browser_hover(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""Физическое наведение курсора на элемент.
+
+		Issue #4964. В реестре browser-use действия ``hover`` нет вообще, а обойти
+		это через ``evaluate`` с ``dispatchEvent(new MouseEvent('mouseover'))``
+		НЕЛЬЗЯ: синтетическое событие не двигает внутреннюю позицию мыши браузера,
+		поэтому CSS ``:hover`` не активируется. Всё, что показывается чисто на
+		``:hover`` — меню по наведению, кнопки действий в строке списка, тултипы,
+		мега-меню — синтетикой недостижимо. Проверяется это в smoke.py парой
+		тестов: тот же элемент через ``evaluate`` не появляется, через
+		``browser_hover`` появляется.
+
+		Поэтому единственный рабочий путь — CDP ``Input.dispatchMouseEvent`` типа
+		``mouseMoved``: он идёт через тот же вход, что и настоящая мышь, и обновляет
+		hover-состояние движка.
+		"""
+		waiting_mod = _bu_mcp('waiting')
+		session, _ = await self._ensure_session()
+		await self._check_domain_gate('click')
+
+		node, live_index, info = await self._resolve(session, int(args['index']), what='hovered')
+		before = await self._delta_start(session)
+		geo = await self._hover_point(session, node, live_index)
+		cdp_session, session_id, point = geo['cdp'], geo['session_id'], geo['point']
+
+		try:
+			await cdp_session.cdp_client.send.Input.dispatchMouseEvent(
+				params={'type': 'mouseMoved', 'x': point['x'], 'y': point['y'], 'buttons': 0},
+				session_id=session_id,
+			)
+			await asyncio.sleep(HOVER_MOVE_GAP)
+			await cdp_session.cdp_client.send.Input.dispatchMouseEvent(
+				params={'type': 'mouseMoved', 'x': point['x2'], 'y': point['y2'], 'buttons': 0},
+				session_id=session_id,
+			)
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'hover on [{live_index}] failed: {type(exc).__name__}: {exc}') from exc
+
+		hit = await self._hover_hit(cdp_session, session_id, geo['backend_node_id'], point)
+		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 3.0))
+		delta = await self._delta_end(session, before)
+
+		action = (
+			f'Pointer moved to ({point["x"]:.0f}, {point["y"]:.0f}) on element [{live_index}] via CDP '
+			f'Input.dispatchMouseEvent — a real pointer move, so CSS :hover is active.'
+		)
+		if hit.get('self') is False:
+			action += (
+				f' WARNING: the topmost element at that point is {hit.get("hit")!r}, not the requested '
+				f'element — something is covering it, and :hover applies to the overlay instead.'
+			)
+		payload: dict[str, Any] = {
+			'action': action,
+			**info,
+			'point': f'{point["x"]:.0f},{point["y"]:.0f}',
+			'rect': point['rect'],
+			'viewport': point['viewport'],
+			'hit': hit,
+			'url': await self._current_url(),
+			'waiting': waiting,
+			'delta': delta,
+		}
+		if point['clipped']:
+			payload['clipped'] = True
+		return self._text(payload, compact=True)
+
+	async def _hover_hit(
+		self, cdp_session: Any, session_id: Any, backend_node_id: Any, point: dict[str, Any]
+	) -> dict[str, Any]:
+		"""Что реально под курсором. Fail-open: не смогли — ``{'hit': None, 'self': None}``."""
+		try:
+			resolved = await cdp_session.cdp_client.send.DOM.resolveNode(
+				params={'backendNodeId': backend_node_id}, session_id=session_id
+			)
+			object_id = resolved['object']['objectId']
+			out = await cdp_session.cdp_client.send.Runtime.callFunctionOn(
+				params={
+					'functionDeclaration': _HOVER_HIT_JS,
+					'objectId': object_id,
+					'arguments': [{'value': point['x']}, {'value': point['y']}],
+					'returnByValue': True,
+				},
+				session_id=session_id,
+			)
+			value = out.get('result', {}).get('value')
+			if isinstance(value, dict):
+				return value
+		except Exception:  # noqa: BLE001
+			pass
+		return {'hit': None, 'self': None}
 
 	# --- browser_click ----------------------------------------------------- #
 
@@ -999,8 +1518,10 @@ class BuMcpServer:
 		session, tools = await self._ensure_session()
 		await self._check_domain_gate('click')
 
-		live_index, info = await self._resolve(session, int(args['index']))
+		_node, live_index, info = await self._resolve(session, int(args['index']))
 		tabs_before = await self._tab_snapshot(session)
+		# Снимок вкладок уже есть — второй раз за ним не ходим.
+		before = await self._delta_start(session, tabs=tabs_before)
 		try:
 			result = await tools.registry.execute_action(
 				'click',
@@ -1019,8 +1540,16 @@ class BuMcpServer:
 		tabs_after = await self._tab_snapshot(session)
 		action_text, tab_info = self._reconcile_new_tab(action_text, tabs_before, tabs_after)
 		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
+		delta = await self._delta_end(session, before, tabs=tabs_after)
 		return self._text(
-			{'action': action_text, **info, 'tab': tab_info, 'url': await self._current_url(), 'waiting': waiting},
+			{
+				'action': action_text,
+				**info,
+				'tab': tab_info,
+				'url': await self._current_url(),
+				'waiting': waiting,
+				'delta': delta,
+			},
 			compact=True,
 		)
 
@@ -1128,7 +1657,8 @@ class BuMcpServer:
 		session, tools = await self._ensure_session()
 		await self._check_domain_gate('input')
 
-		live_index, info = await self._resolve(session, int(args['index']))
+		_node, live_index, info = await self._resolve(session, int(args['index']), what='typed into')
+		before = await self._delta_start(session)
 		try:
 			result = await tools.registry.execute_action(
 				'input',
@@ -1141,8 +1671,10 @@ class BuMcpServer:
 
 		action_text = self._action_result_text('input', result)
 		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
+		delta = await self._delta_end(session, before)
 		return self._text(
-			{'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting}, compact=True
+			{'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting, 'delta': delta},
+			compact=True,
 		)
 
 	# --- browser_screenshot ------------------------------------------------ #
@@ -1176,6 +1708,32 @@ class BuMcpServer:
 			types.TextContent(type='text', text=self._json(meta, compact=True)),
 			types.ImageContent(type='image', data=base64.b64encode(data).decode(), mimeType='image/png'),
 		]
+
+	# --- реестровые действия, меняющие состояние: тот же конверт с дельтой -- #
+
+	#: Для каких действий смена ``document.activeElement`` считается результатом,
+	#: а не побочкой. Для ``send_keys('Tab')`` перевод фокуса — это ВЕСЬ эффект и
+	#: без него дельта была бы ложно пустой; для клика та же смена происходит от
+	#: любого mousePressed по фокусируемому узлу, сработал обработчик или нет.
+	DELTA_FOCUS_COUNTS = frozenset({'send_keys'})
+
+	async def _tool_registry_with_delta(self, name: str, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""``select_dropdown`` / ``send_keys``: реестровое действие + расписка о последствиях.
+
+		Схема у них остаётся реестровой (см. ``_build_tool_list``), подменяется
+		только конверт ответа: голый текст -> компактный JSON с ``url`` и
+		``delta``. Оба меняют состояние страницы и оба умеют «выполниться» вхолостую:
+		``send_keys('Enter')`` в форме, которую заблокировала валидация, и
+		``select_dropdown`` в кастомном комбобоксе, где выбор не применился, дают
+		дословно тот же текст, что и сработавшие.
+		"""
+		session, _ = await self._ensure_session()
+		await self._check_domain_gate(name)
+		before = await self._delta_start(session)
+		text = await self._run_registry_action(name, args)
+		extra = ('active',) if name in self.DELTA_FOCUS_COUNTS else ()
+		delta = await self._delta_end(session, before, extra_significant=extra)
+		return self._text({'action': text, 'url': await self._current_url(), 'delta': delta}, compact=True)
 
 	# --- scroll: проверка фактом ------------------------------------------- #
 
@@ -1491,8 +2049,13 @@ class BuMcpServer:
 				# Не подмена инструмента, а верификация реестрового: схему эти два
 				# по-прежнему берут из реестра (см. _build_tool_list), меняется
 				# только то, что результат сверяется с фактом, а не берётся на веру.
+				'browser_hover': self._tool_browser_hover,
 				'scroll': self._tool_scroll,
 				'switch': self._tool_switch,
+				# То же самое для действий, меняющих состояние: схема реестровая,
+				# добавлена только расписка о последствиях (delta).
+				'select_dropdown': lambda a: self._tool_registry_with_delta('select_dropdown', a),
+				'send_keys': lambda a: self._tool_registry_with_delta('send_keys', a),
 			}
 			if name in overrides:
 				return await overrides[name](args)
@@ -1521,10 +2084,16 @@ class BuMcpServer:
 		instructions = (
 			f'{SECURITY_BOUNDARY}\n\n'
 			'Browser automation over a live Chrome instance (browser-use under the hood).\n\n'
-			'Workflow: browser_navigate -> browser_state -> browser_click / browser_type by the '
-			'indices you saw in browser_state. Indices are only valid for the snapshot they came '
-			'from; if an element moved or vanished, the call fails loudly instead of clicking '
-			'something else. Take a fresh browser_state and retry.\n\n'
+			'Workflow: browser_navigate -> browser_state -> browser_click / browser_type / '
+			'browser_hover by the indices you saw in browser_state. Indices are only valid for the '
+			'snapshot they came from; if an element moved or vanished, the call fails loudly instead '
+			'of clicking something else. Take a fresh browser_state and retry.\n\n'
+			'Use browser_hover for anything that only appears on pointer hover (menus, row action '
+			'buttons, tooltips): a synthetic MouseEvent from evaluate() cannot do this, it does not '
+			'move the browser pointer and does not trigger CSS :hover.\n\n'
+			'Every state-changing action returns a `delta` key: what measurably changed on the page. '
+			'`delta.no_effect` means the action reported success but nothing changed — treat that step '
+			'as NOT done and check browser_state before continuing.\n\n'
 			'Domain policy: a single allowlist from BU_MCP_ALLOWED_DOMAINS (comma separated, empty '
 			'means unrestricted). There is no deny list, so there is no allow-vs-deny precedence to '
 			'reason about: what is not listed is blocked.'
