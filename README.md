@@ -31,12 +31,25 @@
 ```bash
 scripts/chrome-automation.sh          # Chrome с CDP на 9222, headless
 PYTHONPATH=. python -m bu_mcp.server  # MCP-сервер, транспорт stdio
-PYTHONPATH=. python bu_mcp/smoke.py   # 93 проверки на живом браузере
+PYTHONPATH=. python bu_mcp/smoke.py   # 139 проверок на живом браузере
 ```
 
 **Что НЕ проверено:** что агент с этим слоем решает реальные задачи лучше или
 дешевле. Все измерения сделаны без модели в цикле и характеризуют сервер, а не
 агента.
+
+## Авторство и лицензия
+
+Надстройка (`bu_mcp/`, `bu_eval/`, `scripts/`) — © 2026 Roman Akramov
+([@draiqw](https://github.com/draiqw)), MIT.
+
+Всё остальное — browser-use, © 2024 Gregor Zunic, MIT. Его код здесь не изменён
+ни строкой, и авторское уведомление сохранено в [`LICENSE`](LICENSE) как того
+требует лицензия. Условия у обеих частей одни и те же, так что практической
+разницы для пользователя нет — разделение нужно, чтобы было видно, кто что писал.
+
+Родственный проект — [computer-agent](https://github.com/draiqw/computer-agent):
+та же идея, но работа делается файлами и шеллом, а не страницами.
 
 Ниже — оригинальный README browser-use.
 
