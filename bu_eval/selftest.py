@@ -12,6 +12,67 @@ from __future__ import annotations
 from bu_eval.upstream import Check
 
 
+def t_never_headed() -> Check:
+	"""Окна быть не может ни при каком флаге.
+
+	Проверка появилась после происшествия: харнесс поднял Chrome с окном, и
+	каждая открытая вкладка забирала фокус у владельца, который в этот момент
+	работал за машиной. Чинится это не аккуратностью, а отсутствием ветки
+	запуска: `bu_eval` умеет только ПОДКЛЮЧАТЬСЯ к уже работающему headless
+	Chrome. Здесь это и проверяется — и по профилю, и по исходникам, чтобы
+	ветка не вернулась случайно.
+	"""
+	from pathlib import Path
+
+	from bu_eval.backends import attached_profile
+
+	p = attached_profile()
+	bad = []
+	if p.headless is not True:
+		bad.append(f'headless={p.headless}')
+	if p.keep_alive is not True:
+		bad.append(f'keep_alive={p.keep_alive} — выход из сессии сбросит чужой Chrome')
+	if p.viewport is not None or p.no_viewport is not True:
+		bad.append(f'viewport={p.viewport} no_viewport={p.no_viewport} — поедет геометрия чужих вкладок')
+	if not p.cdp_url:
+		bad.append('нет cdp_url — browser-use поднимет браузер сам')
+
+	root = Path(__file__).resolve().parent
+	for src in sorted(root.rglob('*.py')):
+		text = src.read_text(encoding='utf-8')
+		rel = src.relative_to(root).as_posix()
+		if rel == 'selftest.py':
+			continue
+		if '--headed' in text or 'chrome-automation.sh --headed' in text:
+			bad.append(f'{rel}: вернулся флаг --headed')
+		if 'Browser(' in text or 'headless=headless' in text:
+			bad.append(f'{rel}: вернулась ветка запуска своего браузера')
+
+	# Питон — не единственная дверь. Окно в прошлый раз пришло из шелл-скрипта:
+	# у него был флаг --headed, а при живом 9222 он молча выходил, поэтому
+	# однажды поднятый headed-экземпляр переживал все последующие запуски.
+	launcher = root.parent / 'scripts' / 'chrome-automation.sh'
+	if not launcher.exists():
+		bad.append('scripts/chrome-automation.sh пропал')
+	else:
+		sh = launcher.read_text(encoding='utf-8')
+		if '--headless=new' not in sh:
+			bad.append('chrome-automation.sh: запуск без --headless=new')
+		if 'MODE=' in sh:
+			bad.append('chrome-automation.sh: вернулась переменная режима — раньше через неё и терялся headless')
+		if 'exit 2' not in sh:
+			bad.append('chrome-automation.sh: --headed больше не отбивается')
+		if 'headed_pids' not in sh:
+			bad.append('chrome-automation.sh: нет вытеснения уже работающего headed-экземпляра')
+
+	return Check(
+		'selftest',
+		'браузер всегда без окна',
+		not bad,
+		'; '.join(bad) if bad else f'только подключение к {p.cdp_url}, headless, viewport не трогаем',
+	)
+
+
 def t_model_factory() -> Check:
 	"""Фабрика моделей ставит лимит ответа туда, где он у провайдера называется по-своему,
 	и не подсовывает классу параметров, которых у него нет."""
@@ -204,6 +265,7 @@ def t_matrix() -> Check:
 
 
 CHECKS = [
+	t_never_headed,
 	t_model_factory,
 	t_profiles,
 	t_mcp_profiles,
