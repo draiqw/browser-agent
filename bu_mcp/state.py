@@ -606,9 +606,7 @@ async def serialize_state(session: 'BrowserSession', *, max_chars: int = 40000) 
 				# несколько «текущих» вкладок, когда две открыты на одной странице,
 				# и клиент, закрывающий «текущую», попадает не в ту.
 				'current': (
-					getattr(tab, 'target_id', None) == _focus
-					if _focus
-					else tab.url == state.url and tab.title == state.title
+					getattr(tab, 'target_id', None) == _focus if _focus else tab.url == state.url and tab.title == state.title
 				),
 			}
 			for tab in (state.tabs or [])

@@ -26,32 +26,32 @@ TASK = ' '.join(sys.argv[1:]) or 'Открой example.com и скажи, что
 
 
 def check_cdp() -> None:
-    try:
-        r = httpx.get(f'{CDP_URL}/json/version', timeout=2)
-        print(f'CDP ok: {r.json().get("Browser")}')
-    except Exception:
-        sys.exit(
-            'Chrome не слушает 9222.\n'
-            'Закрой Chrome и запусти его так:\n'
-            '  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222\n'
-        )
+	try:
+		r = httpx.get(f'{CDP_URL}/json/version', timeout=2)
+		print(f'CDP ok: {r.json().get("Browser")}')
+	except Exception:
+		sys.exit(
+			'Chrome не слушает 9222.\n'
+			'Закрой Chrome и запусти его так:\n'
+			'  "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome" --remote-debugging-port=9222\n'
+		)
 
 
 async def main() -> None:
-    check_cdp()
-    if not os.getenv('OPENROUTER_API_KEY'):
-        sys.exit('OPENROUTER_API_KEY не найден в ~/.claude-accounts/openrouter.env')
+	check_cdp()
+	if not os.getenv('OPENROUTER_API_KEY'):
+		sys.exit('OPENROUTER_API_KEY не найден в ~/.claude-accounts/openrouter.env')
 
-    session = BrowserSession(browser_profile=BrowserProfile(cdp_url=CDP_URL, is_local=True))
-    agent = Agent(
-        task=TASK,
-        llm=ChatOpenRouter(model=MODEL),
-        browser_session=session,
-    )
-    history = await agent.run(max_steps=15)
-    print('\n=== РЕЗУЛЬТАТ ===')
-    print(history.final_result())
+	session = BrowserSession(browser_profile=BrowserProfile(cdp_url=CDP_URL, is_local=True))
+	agent = Agent(
+		task=TASK,
+		llm=ChatOpenRouter(model=MODEL),
+		browser_session=session,
+	)
+	history = await agent.run(max_steps=15)
+	print('\n=== РЕЗУЛЬТАТ ===')
+	print(history.final_result())
 
 
 if __name__ == '__main__':
-    asyncio.run(main())
+	asyncio.run(main())

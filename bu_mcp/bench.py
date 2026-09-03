@@ -259,7 +259,13 @@ class McpClient:
 		try:
 			result = await self._request('tools/call', {'name': tool, 'arguments': args}, timeout=timeout)
 		except (TimeoutError, asyncio.TimeoutError):
-			return {'ok': False, 'is_error': True, 'timeout': True, 'text': f'TIMEOUT after {timeout}s', 'elapsed': time.monotonic() - t0}
+			return {
+				'ok': False,
+				'is_error': True,
+				'timeout': True,
+				'text': f'TIMEOUT after {timeout}s',
+				'elapsed': time.monotonic() - t0,
+			}
 		except McpError as exc:
 			return {'ok': False, 'is_error': True, 'timeout': False, 'text': str(exc), 'elapsed': time.monotonic() - t0}
 		elapsed = time.monotonic() - t0
@@ -542,7 +548,7 @@ JS_DIAGNOSE = """
 })()
 """
 
-JS_COUNTS = "(() => JSON.stringify(window.__bench || {}))()"
+JS_COUNTS = '(() => JSON.stringify(window.__bench || {}))()'
 
 JS_CLEANUP = """
 (() => {
@@ -644,7 +650,12 @@ async def measure_once(bound: Bound, url: str) -> dict[str, Any]:
 				'hydrated': waiting.get('hydrated'),
 				'elapsed': waiting.get('elapsed'),
 				'stages': [
-					{'name': s.get('name') or s.get('stage'), 'ok': s.get('ok'), 'elapsed': s.get('elapsed'), 'detail': s.get('detail')}
+					{
+						'name': s.get('name') or s.get('stage'),
+						'ok': s.get('ok'),
+						'elapsed': s.get('elapsed'),
+						'detail': s.get('detail'),
+					}
 					for s in (waiting.get('stages') or [])
 					if isinstance(s, dict)
 				],
@@ -801,7 +812,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 		'errors': [],
 	}
 	try:
-		with urllib.request.urlopen(f'{CDP_URL}/json/version', timeout=10) as fh:
+		with urllib.request.urlopen(f'{CDP_URL}/json/version', timeout=10) as fh:  # noqa: ASYNC210 - метаданные и уборка, вне измеряемого пути
 			results['chrome'] = json.load(fh)
 	except Exception as exc:  # noqa: BLE001
 		raise SystemExit(f'Chrome CDP not reachable at {CDP_URL}: {exc}. Run scripts/chrome-automation.sh')
@@ -870,13 +881,15 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 		for b in bounds.values():
 			if b.target_id and b.target_id not in foreign_pages:
 				try:
-					urllib.request.urlopen(f'{CDP_URL}/json/close/{b.target_id}', timeout=10).read()
+					urllib.request.urlopen(f'{CDP_URL}/json/close/{b.target_id}', timeout=10).read()  # noqa: ASYNC210 - метаданные и уборка, вне измеряемого пути
 					print(f'[bench] closed own tab {b.target_id[:8]}', file=sys.stderr)
 				except Exception as exc:  # noqa: BLE001
 					print(f'[bench] WARN could not close own tab: {exc}', file=sys.stderr)
 		still = {t['id']: (t.get('url') or '') for t in cdp_pages()}
 		lost = [f'{tid[:8]} {u[:80]}' for tid, u in foreign_pages.items() if tid not in still]
-		changed = [f'{tid[:8]} {u[:60]} -> {still[tid][:60]}' for tid, u in foreign_pages.items() if tid in still and still[tid] != u]
+		changed = [
+			f'{tid[:8]} {u[:60]} -> {still[tid][:60]}' for tid, u in foreign_pages.items() if tid in still and still[tid] != u
+		]
 		results['foreign_tabs_lost'] = lost
 		results['foreign_tabs_changed'] = changed
 		if lost:
@@ -958,7 +971,7 @@ async def sample_pass(args: argparse.Namespace) -> dict[str, Any]:
 		for b in bounds.values():
 			if b.target_id and b.target_id not in foreign_pages:
 				try:
-					urllib.request.urlopen(f'{CDP_URL}/json/close/{b.target_id}', timeout=10).read()
+					urllib.request.urlopen(f'{CDP_URL}/json/close/{b.target_id}', timeout=10).read()  # noqa: ASYNC210 - метаданные и уборка, вне измеряемого пути
 				except Exception:  # noqa: BLE001
 					pass
 	results['composition'] = comp
@@ -972,8 +985,7 @@ async def sample_pass(args: argparse.Namespace) -> dict[str, Any]:
 
 def _detail_bucket(detail: str) -> str:
 	"""Collapse per-run loader ids so stage details can be counted."""
-	for prefix in ('no navigation detected', 'new document', 'same-document navigation',
-	               'skipped', 'timeout'):
+	for prefix in ('no navigation detected', 'new document', 'same-document navigation', 'skipped', 'timeout'):
 		if detail.startswith(prefix):
 			return prefix
 	if 'already committed but has not emitted load yet' in detail:
@@ -1025,8 +1037,10 @@ def _dominant(vals: list[str]) -> str:
 	counts: dict[str, int] = {}
 	for v in vals:
 		counts[v] = counts.get(v, 0) + 1
+
 	def rank(kv: tuple[str, int]) -> tuple[int, int]:
 		return (kv[1], severity.index(kv[0]) if kv[0] in severity else 99)
+
 	return max(counts.items(), key=rank)[0] if counts else 'ok'
 
 
@@ -1070,8 +1084,7 @@ def build_report(results: dict[str, Any]) -> str:
 	for k, s in results['servers'].items():
 		env = ' '.join(f'{a}={b}' for a, b in s['env'].items())
 		cmd = f'{env} {" ".join(s["argv"])}'.strip().replace(results['python'], 'python')
-		A(f'| **{k}** | `{cmd}` | '
-		  f'`{SERVERS[k].tool_state}` | `{SERVERS[k].tool_navigate}` | `{SERVERS[k].tool_click}` |')
+		A(f'| **{k}** | `{cmd}` | ' f'`{SERVERS[k].tool_state}` | `{SERVERS[k].tool_navigate}` | `{SERVERS[k].tool_click}` |')
 	A('')
 	A('Per site, per server, per repeat: `navigate(url)` then the state tool. Nothing else is')
 	A('called, and no site element is ever clicked.')
@@ -1118,9 +1131,12 @@ def build_report(results: dict[str, Any]) -> str:
 		b = agg.get(f'{skey}|ours', {})
 		A(f'| {skey} | `{meta["url"]}` | {meta["source"]} | {a.get("outcome", "--")} / {b.get("outcome", "--")} |')
 	A('')
-	odd = [f'{r["site"]}/{r["server"]}/rep{r["repeat"]} -> `{r.get("outcome")}` '
-	       f'({r.get("chars")} chars, {r.get("elements")} elements)'
-	       for r in results['runs'] if r.get('outcome') != 'ok']
+	odd = [
+		f'{r["site"]}/{r["server"]}/rep{r["repeat"]} -> `{r.get("outcome")}` '
+		f'({r.get("chars")} chars, {r.get("elements")} elements)'
+		for r in results['runs']
+		if r.get('outcome') != 'ok'
+	]
 	total_runs = len(results['runs'])
 	if odd:
 		A(f'**{len(odd)} of {total_runs} individual runs did not come back `ok`:**')
@@ -1174,7 +1190,9 @@ def build_report(results: dict[str, Any]) -> str:
 	A('Seconds, median. Navigation latency is dominated by the network and by how long each server')
 	A('waits before returning, not by serialization.')
 	A('')
-	A('| site | nav stock | nav ours | nav cold stock | nav cold ours | nav warm stock | nav warm ours | state stock | state ours |')
+	A(
+		'| site | nav stock | nav ours | nav cold stock | nav cold ours | nav warm stock | nav warm ours | state stock | state ours |'
+	)
 	A('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
 	for skey in sites:
 		a = agg.get(f'{skey}|stock', {})
@@ -1186,23 +1204,31 @@ def build_report(results: dict[str, Any]) -> str:
 			f'| {fmt(a.get("state_s"), 2)} | {fmt(b.get("state_s"), 2)} |'
 		)
 	A('')
-	st_pairs = [(agg[f'{k}|stock'].get('state_s'), agg[f'{k}|ours'].get('state_s')) for k in sites
-	            if agg.get(f'{k}|stock', {}).get('state_s') and agg.get(f'{k}|ours', {}).get('state_s')]
+	st_pairs = [
+		(agg[f'{k}|stock'].get('state_s'), agg[f'{k}|ours'].get('state_s'))
+		for k in sites
+		if agg.get(f'{k}|stock', {}).get('state_s') and agg.get(f'{k}|ours', {}).get('state_s')
+	]
 	if st_pairs:
 		wins = sum(1 for a, b in st_pairs if b < a)
-		A(f'**The state call is consistently faster on bu_mcp: {wins}/{len(st_pairs)} sites**, median ratio '
-		  f'{statistics.median([b / a for a, b in st_pairs]):.2f}x. That is the one latency number that is')
+		A(
+			f'**The state call is consistently faster on bu_mcp: {wins}/{len(st_pairs)} sites**, median ratio '
+			f'{statistics.median([b / a for a, b in st_pairs]):.2f}x. That is the one latency number that is'
+		)
 		A('about the servers rather than about the network, and the cause is checkable in the source:')
 		A('`browser_use/mcp/server.py:888` calls `get_browser_state_summary()` with no arguments, and')
 		A('that signature defaults to `include_screenshot=True` (`browser_use/browser/session.py:1591`).')
 		A('The frame is captured every time and then discarded at `server.py:928`, which only forwards')
 		A('it when the *tool* argument `include_screenshot` is true -- and this benchmark always passes')
-		A('false. bu_mcp\'s `browser_state` never takes the screenshot at all. On this corpus that costs')
+		A("false. bu_mcp's `browser_state` never takes the screenshot at all. On this corpus that costs")
 		A('the stock server roughly a tenth of a second to half a second per look at the page, for a')
 		A('picture nobody receives.')
 		A('')
-	nav_pairs = [(agg[f'{k}|stock'].get('nav_s'), agg[f'{k}|ours'].get('nav_s')) for k in sites
-	             if agg.get(f'{k}|stock', {}).get('nav_s') and agg.get(f'{k}|ours', {}).get('nav_s')]
+	nav_pairs = [
+		(agg[f'{k}|stock'].get('nav_s'), agg[f'{k}|ours'].get('nav_s'))
+		for k in sites
+		if agg.get(f'{k}|stock', {}).get('nav_s') and agg.get(f'{k}|ours', {}).get('nav_s')
+	]
 	if nav_pairs:
 		deltas = [b - a for a, b in nav_pairs]
 		A(f'**Navigation is consistently slower on bu_mcp**, by a median of {statistics.median(deltas):.2f}s. Most of')
@@ -1211,7 +1237,9 @@ def build_report(results: dict[str, Any]) -> str:
 		A('')
 
 	# ---------------- summary
-	ok_sites = [s for s in sites if agg.get(f'{s}|stock', {}).get('outcome') == 'ok' and agg.get(f'{s}|ours', {}).get('outcome') == 'ok']
+	ok_sites = [
+		s for s in sites if agg.get(f'{s}|stock', {}).get('outcome') == 'ok' and agg.get(f'{s}|ours', {}).get('outcome') == 'ok'
+	]
 	A('## Summary')
 	A('')
 	if ok_sites:
@@ -1230,15 +1258,23 @@ def build_report(results: dict[str, Any]) -> str:
 		A('|---|---:|---:|---:|')
 		A(f'| total chars across the corpus | {sum(sc):,.0f} | {sum(oc):,.0f} | {sum(oc) / sum(sc):.2f}x |')
 		A(f'| total elements across the corpus | {sum(se):,.0f} | {sum(oe):,.0f} | {sum(oe) / sum(se):.2f}x |')
-		A(f'| corpus-wide chars per element | {sum(sc) / sum(se):.1f} | {sum(oc) / sum(oe):.1f} | {(sum(oc) / sum(oe)) / (sum(sc) / sum(se)):.2f}x |')
-		A(f'| median per-site chars | {statistics.median(sc):,.0f} | {statistics.median(oc):,.0f} | {statistics.median(size_r):.2f}x |')
-		A(f'| median per-site cpe | {statistics.median(s_cpe):.1f} | {statistics.median(o_cpe):.1f} | {statistics.median(cpe_r):.2f}x |')
+		A(
+			f'| corpus-wide chars per element | {sum(sc) / sum(se):.1f} | {sum(oc) / sum(oe):.1f} | {(sum(oc) / sum(oe)) / (sum(sc) / sum(se)):.2f}x |'
+		)
+		A(
+			f'| median per-site chars | {statistics.median(sc):,.0f} | {statistics.median(oc):,.0f} | {statistics.median(size_r):.2f}x |'
+		)
+		A(
+			f'| median per-site cpe | {statistics.median(s_cpe):.1f} | {statistics.median(o_cpe):.1f} | {statistics.median(cpe_r):.2f}x |'
+		)
 		A(f'| median per-site element recall | -- | -- | {statistics.median(el_r):.2f}x |')
 		A('')
 		wins = [s for s in ok_sites if agg[f'{s}|ours']['cpe'] < agg[f'{s}|stock']['cpe']]
 		losses = [s for s in ok_sites if agg[f'{s}|ours']['cpe'] >= agg[f'{s}|stock']['cpe']]
-		A(f'bu_mcp has the lower chars/element on **{len(wins)}/{len(ok_sites)}** sites '
-		  f'({", ".join(wins) if wins else "none"}).')
+		A(
+			f'bu_mcp has the lower chars/element on **{len(wins)}/{len(ok_sites)}** sites '
+			f'({", ".join(wins) if wins else "none"}).'
+		)
 		if losses:
 			A('')
 			A(f'It **loses** on {len(losses)}: {", ".join(losses)}.')
@@ -1285,10 +1321,12 @@ def build_report(results: dict[str, Any]) -> str:
 			c = comp.get(skey) or {}
 			a = c.get('stock') or {}
 			b = c.get('ours') or {}
-			A(f'| {skey} | {fmt(a.get("n"))}/{fmt(b.get("n"))} | {fmt(a.get("total"))} | {fmt(a.get("json_skeleton"))} '
-			  f'| {fmt(a.get("href_inline"))} | {fmt(a.get("text_inline"))} | {fmt(a.get("metadata"))} '
-			  f'| {fmt(b.get("total"))} | {fmt(b.get("tree_raw"))} | {fmt(b.get("json_escape"))} '
-			  f'| {fmt(b.get("href_map"))} | {fmt(b.get("metadata"))} |')
+			A(
+				f'| {skey} | {fmt(a.get("n"))}/{fmt(b.get("n"))} | {fmt(a.get("total"))} | {fmt(a.get("json_skeleton"))} '
+				f'| {fmt(a.get("href_inline"))} | {fmt(a.get("text_inline"))} | {fmt(a.get("metadata"))} '
+				f'| {fmt(b.get("total"))} | {fmt(b.get("tree_raw"))} | {fmt(b.get("json_escape"))} '
+				f'| {fmt(b.get("href_map"))} | {fmt(b.get("metadata"))} |'
+			)
 		A('')
 		A('Three separate effects fall out of this table, and together they explain every row of the')
 		A('cost table above.')
@@ -1303,10 +1341,12 @@ def build_report(results: dict[str, Any]) -> str:
 			A(f'* {statistics.median(per):.0f} bytes of pure JSON skeleton per element (median over the corpus),')
 			A(f'  {min(per):.0f} to {max(per):.0f} across sites.')
 			worst = max(sk, key=lambda kv: kv[1]['json_skeleton'] / max(kv[1]['total'], 1))
-			A(f'* on `{worst[0]}` the skeleton alone is {worst[1]["json_skeleton"]:,} of '
-			  f'{worst[1]["total"]:,} bytes = {100 * worst[1]["json_skeleton"] / worst[1]["total"]:.0f}% of the whole observation.')
+			A(
+				f'* on `{worst[0]}` the skeleton alone is {worst[1]["json_skeleton"]:,} of '
+				f'{worst[1]["total"]:,} bytes = {100 * worst[1]["json_skeleton"] / worst[1]["total"]:.0f}% of the whole observation.'
+			)
 		A('')
-		A('bu_mcp\'s equivalent is one tab-indented line per element, which is why it wins outright on')
+		A("bu_mcp's equivalent is one tab-indented line per element, which is why it wins outright on")
 		A('the element-dense pages (arxiv, wolframalpha, real_omnizon).')
 		A('')
 		A('**2. bu_mcp pays a flat envelope, and on sparse pages the envelope is the page.** Its')
@@ -1318,8 +1358,10 @@ def build_report(results: dict[str, Any]) -> str:
 			A(f'* bu_mcp metadata: {min(mm):,} to {max(mm):,} bytes, median {statistics.median(mm):,.0f}.')
 			thin = [(k, v) for k, v in ourmeta if v.get('tree_raw') and v['metadata'] > v['tree_raw']]
 			for k, v in thin:
-				A(f'* on `{k}` the metadata ({v["metadata"]:,}) is **larger than the element tree itself** '
-				  f'({v["tree_raw"]:,}). The page has {v.get("n")} interactive elements; there is nothing to amortise it over.')
+				A(
+					f'* on `{k}` the metadata ({v["metadata"]:,}) is **larger than the element tree itself** '
+					f'({v["tree_raw"]:,}). The page has {v.get("n")} interactive elements; there is nothing to amortise it over.'
+				)
 		A('')
 		A('**3. The tree is a JSON string field, so every newline and tab is re-encoded.** bu_mcp')
 		A('returns a text tree wrapped in pretty-printed JSON, which means each `\\n` and `\\t` costs two')
@@ -1334,7 +1376,9 @@ def build_report(results: dict[str, Any]) -> str:
 			A('**4. `href_map` placeholdering can backfire.** bu_mcp replaces long URLs with')
 			A('`{{_<hash>}}` and moves the real URL into an `href_map`. That pays off when the same URL')
 			A(f'repeats. On `amazon` it does not: the map costs {am["href_map"]:,} bytes on its own, on top of the')
-			A(f'placeholders left in the tree, against {(comp["amazon"]["stock"] or {}).get("href_inline", 0):,} bytes of plain inline hrefs in the stock')
+			A(
+				f'placeholders left in the tree, against {(comp["amazon"]["stock"] or {}).get("href_inline", 0):,} bytes of plain inline hrefs in the stock'
+			)
 			A('payload. Distinct long URLs are exactly the case where the indirection loses.')
 			A('')
 
@@ -1366,7 +1410,7 @@ def build_report(results: dict[str, Any]) -> str:
 	A('* `reidentified` -- the click landed on the live replacement node. Best outcome.')
 	A('* `refused` -- the call failed loudly (`isError=true`). Acceptable: pessimistic but honest.')
 	A('* `clicked-detached` -- the call reported success and the handler on the *detached* node ran.')
-	A('  The event never entered the document; from the page\'s point of view nothing happened, but')
+	A("  The event never entered the document; from the page's point of view nothing happened, but")
 	A('  the server told its client the click succeeded. This is the worst case.')
 	A('* `silent-wrong-click` -- reported success, and the click landed on some other element.')
 	A('* `silent-noop` -- reported success, nothing was clicked anywhere.')
@@ -1376,6 +1420,7 @@ def build_report(results: dict[str, Any]) -> str:
 	stale = results.get('stale') or {}
 	for skey in sites:
 		row = stale.get(skey, {})
+
 		def cell(sv: str, var: str) -> str:
 			r = (row.get(sv) or {}).get(var) or {}
 			if r.get('error'):
@@ -1384,8 +1429,11 @@ def build_report(results: dict[str, Any]) -> str:
 			if r.get('stale_flag'):
 				v += ' (STALE)'
 			return v
-		A(f'| {skey} | {cell("stock", "recreated")} | {cell("ours", "recreated")} '
-		  f'| {cell("stock", "removed")} | {cell("ours", "removed")} |')
+
+		A(
+			f'| {skey} | {cell("stock", "recreated")} | {cell("ours", "recreated")} '
+			f'| {cell("stock", "removed")} | {cell("ours", "removed")} |'
+		)
 	A('')
 
 	counts: dict[str, dict[str, dict[str, int]]] = {}
@@ -1400,12 +1448,23 @@ def build_report(results: dict[str, Any]) -> str:
 			counts[sv][var] = c
 	A('Totals:')
 	A('')
-	A('| server | variant | ' + ' | '.join(['reidentified', 'refused', 'clicked-detached', 'silent-wrong-click', 'silent-noop', 'n/a']) + ' |')
+	A(
+		'| server | variant | '
+		+ ' | '.join(['reidentified', 'refused', 'clicked-detached', 'silent-wrong-click', 'silent-noop', 'n/a'])
+		+ ' |'
+	)
 	A('|---|---|---:|---:|---:|---:|---:|---:|')
 	for sv in ('stock', 'ours'):
 		for var in ('recreated', 'removed'):
 			c = counts[sv][var]
-			A(f'| {sv} | {var} | ' + ' | '.join(str(c.get(k, 0)) for k in ['reidentified', 'refused', 'clicked-detached', 'silent-wrong-click', 'silent-noop', 'n/a']) + ' |')
+			A(
+				f'| {sv} | {var} | '
+				+ ' | '.join(
+					str(c.get(k, 0))
+					for k in ['reidentified', 'refused', 'clicked-detached', 'silent-wrong-click', 'silent-noop', 'n/a']
+				)
+				+ ' |'
+			)
 	A('')
 
 	def silent_share(sv: str, var: str) -> str:
@@ -1414,7 +1473,7 @@ def build_report(results: dict[str, Any]) -> str:
 		tot = sum(v for k, v in c.items() if k != 'n/a')
 		return f'{bad}/{tot}' + (f' = {100 * bad / tot:.0f}%' if tot else '')
 
-	A(f'**Price of the problem.** On the "removed" variant -- where the node is gone and the only')
+	A('**Price of the problem.** On the "removed" variant -- where the node is gone and the only')
 	A(f'correct answer is a loud refusal -- the stock server reports success on {silent_share("stock", "removed")}')
 	A(f'of the sites it could be tested on, bu_mcp on {silent_share("ours", "removed")}.')
 	A('')
@@ -1469,7 +1528,7 @@ def build_report(results: dict[str, Any]) -> str:
 			A('wait for". The verdict `ready=true` is therefore mostly vacuous: it means "the ladder')
 			A('had nothing to wait for", not "the page settled".')
 			A('')
-			A('So the ~2.5s that separates bu_mcp\'s navigate latency from the stock one is, on most')
+			A("So the ~2.5s that separates bu_mcp's navigate latency from the stock one is, on most")
 			A('sites, a dead poll rather than a measured wait. It is bought at full price and its')
 			A('value is accidental: the page does keep hydrating during those seconds, which is where')
 			A('the extra elements on `google_maps` and `coursera` come from. But a fixed `sleep(2.5)`')
@@ -1493,7 +1552,7 @@ def build_report(results: dict[str, Any]) -> str:
 	A('  element on element-dense pages and more expensive on sparse ones. The crossover is')
 	A('  structural: the stock server pays a per-element JSON skeleton, bu_mcp pays a flat')
 	A('  per-observation envelope. Neither is uniformly better; the corpus decides.')
-	A('* **Two of bu_mcp\'s size losses look like defects rather than trade-offs.** The JSON-escaping')
+	A("* **Two of bu_mcp's size losses look like defects rather than trade-offs.** The JSON-escaping")
 	A('  of the tree is pure waste, and the `href_map` indirection is a net loss whenever the URLs')
 	A('  on the page are long and distinct rather than repeated.')
 	A('* **Handle correctness is not a wash.** The stock server reported a successful click on a')
@@ -1521,14 +1580,14 @@ def build_report(results: dict[str, Any]) -> str:
 	A('  judged. A server could keep exactly the elements a task needs and still score badly, or')
 	A('  keep 500 useless ones and score well.')
 	A('* **Whether the compact tree is more legible to a model than flat JSON.** That is the whole')
-	A('  design claim behind bu_mcp\'s `browser_state`, and it can only be settled by running an')
+	A("  design claim behind bu_mcp's `browser_state`, and it can only be settled by running an")
 	A('  agent, not by counting characters.')
 	A('* **Multi-step behaviour.** Scrolling, typing, tab switching, downloads, iframes, shadow DOM')
 	A('  and re-planning after a failed action are untouched. One navigate plus one state call is a')
 	A('  fraction of a real trajectory.')
 	A('* **Cost in tokens.** Characters are a proxy. Tokenizers do not treat a JSON blob and an')
 	A('  indented tree identically, and the ratio between the two is not 1:1.')
-	A('* **The screenshot path.** `include_screenshot=False` throughout, so the stock server\'s habit')
+	A("* **The screenshot path.** `include_screenshot=False` throughout, so the stock server's habit")
 	A('  of capturing a frame and discarding it shows up only as latency here, never as payload.')
 	A('* **Stability over time.** Live sites change, A/B tests differ per session, and a logged-in')
 	A('  Google profile sees different pages than a fresh one. Re-running this on another day will')
