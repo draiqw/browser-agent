@@ -566,6 +566,64 @@ def check_server_imports() -> Check:
 	)
 
 
+def check_headless_viewport_side_effect() -> Check:
+	"""`headless=True` при подключении по `cdp_url` тянет за собой viewport-override.
+
+	Это не наша особенность, а поведение апстрима, которое приходится ОБХОДИТЬ
+	в двух местах — `bu_mcp/server.py::_profile` и `bu_eval/backends.py::attached_profile`.
+	`detect_display_configuration` выставляет `viewport = screen` и
+	`no_viewport = False`, после чего browser-use шлёт
+	`Emulation.setDeviceMetricsOverride` на каждую вкладку, которую создаёт ИЛИ
+	на которую переводит фокус, — то есть меняет геометрию в ЧУЖИХ вкладках
+	владельца.
+
+	Проверка ДВУСТОРОННЯЯ. Если побочка исчезла (апстрим починил) — обход стал
+	лишним и об этом надо узнать. Если поля переименовали — обход перестал
+	работать молча, и это уже авария. Поэтому «OK» здесь означает не «всё
+	хорошо», а «мир такой, каким мы его описали в комментариях».
+	"""
+	from browser_use.browser import BrowserProfile
+
+	raw = BrowserProfile(cdp_url='http://127.0.0.1:9222', is_local=True, headless=True)
+	side_effect = raw.viewport is not None and not raw.no_viewport
+	fixed = BrowserProfile(cdp_url='http://127.0.0.1:9222', is_local=True, headless=True)
+	fixed.viewport = None
+	fixed.no_viewport = True
+	workaround_holds = fixed.viewport is None and fixed.no_viewport is True
+	ok = workaround_holds and side_effect
+	if not side_effect:
+		detail = 'побочки больше нет — обход в bu_mcp/server.py и bu_eval/backends.py можно снимать'
+	elif not workaround_holds:
+		detail = 'ПОБОЧКА ЕСТЬ, а обход не применяется: поля viewport/no_viewport стали неизменяемыми'
+	else:
+		detail = f'viewport={raw.viewport.width}x{raw.viewport.height} снимается вручную, как и задумано'
+	return Check('bu_mcp', 'viewport-override при headless', ok, detail)
+
+
+def check_keep_alive_guard() -> Check:
+	"""Гасить чужой Chrome нельзя, и именно поэтому мы зовём `stop()`, а не `kill()`.
+
+	Гард стоит в `on_BrowserStopEvent`: `keep_alive` уважается только при
+	`force=False`. `kill()` шлёт `BrowserStopEvent(force=True)` и проходит мимо
+	гарда, то есть тушит браузер, который завели не мы. Если апстрим поменяет
+	любую половину этой пары, наш выбор `stop()` перестанет что-либо значить.
+	"""
+	from browser_use.browser import BrowserProfile
+
+	has_flag = 'keep_alive' in set(getattr(BrowserProfile, 'model_fields', {}) or {})
+	src = _read('browser/session.py')
+	guard = re.search(r'if self\.browser_profile\.keep_alive and not event\.force', src) is not None
+	kill_forces = re.search(r'async def kill\(self\).*?BrowserStopEvent\(force=True\)', src, re.S) is not None
+	stop_soft = re.search(r'async def stop\(self\).*?BrowserStopEvent\(force=False\)', src, re.S) is not None
+	ok = has_flag and guard and kill_forces and stop_soft
+	return Check(
+		'bu_mcp',
+		'keep_alive против чужого браузера',
+		ok,
+		f'флаг={has_flag}, гард={guard}, kill(force=True)={kill_forces}, stop(force=False)={stop_soft}',
+	)
+
+
 CHECKS = [
 	# HARNESS
 	check_integrity,
@@ -591,7 +649,24 @@ CHECKS = [
 	check_registry_privates,
 	check_action_result_fields,
 	check_server_imports,
+	check_headless_viewport_side_effect,
+	check_keep_alive_guard,
 ]
+
+
+#: Группа проверки нужна и тогда, когда сама проверка упала и Check вернуть некому.
+#: Раньше группа выводилась срезом списка и переехала бы при первой же вставке.
+HARNESS_CHECKS = frozenset(
+	{
+		'check_integrity',
+		'check_coordinate_api',
+		'check_coordinate_allowlist',
+		'check_tools_before_action_model',
+		'check_structured_output',
+		'check_history_accounting',
+		'check_llm_classes',
+	}
+)
 
 
 def run_all() -> list[Check]:
@@ -600,6 +675,6 @@ def run_all() -> list[Check]:
 		try:
 			out.append(fn())
 		except Exception as exc:  # noqa: BLE001 — упавшая проверка это тоже отчёт, а не крах прогона
-			group = 'bu_mcp' if fn.__name__ in {c.__name__ for c in CHECKS[7:]} else 'harness'
+			group = 'harness' if fn.__name__ in HARNESS_CHECKS else 'bu_mcp'
 			out.append(Check(group, fn.__name__, False, f'проверка упала: {exc!r}'))
 	return out

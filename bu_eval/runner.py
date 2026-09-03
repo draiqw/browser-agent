@@ -28,7 +28,6 @@ class Matrix:
 	backends: list[str] = field(default_factory=lambda: ['bu-mcp'])
 	repeats: int = 1
 	max_steps: int | None = None
-	headless: bool = True
 	verify: bool = True
 
 	def cells(self) -> list[tuple[Task, str, str, str]]:
@@ -60,7 +59,6 @@ async def run_matrix(mx: Matrix, on_result=None) -> list[RunReport]:
 				model,
 				PROFILES[prof],
 				max_steps=mx.max_steps or task.max_steps,
-				headless=mx.headless,
 			)
 			rep.attempts = i
 			if rep.ok and mx.verify:

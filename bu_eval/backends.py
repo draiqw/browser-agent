@@ -1,8 +1,7 @@
 """Бэкенд — то, чем крутится задача. Их три, и в этом весь смысл пакета.
 
 * `browser-use` — ванильный апстримный `Agent`. Перенесён из browseruse-lab
-  почти без правок и оставлен намеренно: это база сравнения. Он меряет апстрим,
-  а не нас.
+  и оставлен намеренно: это база сравнения. Он меряет апстрим, а не нас.
 * `bu-mcp` — модель ходит в браузер ТОЛЬКО через наш MCP-сервер по stdio,
   ровно как это делал бы любой клиент. Цикл «модель ↔ инструменты» — в
   `bu_eval.loop`, транспорт — клиент из `bu_mcp.bench` (переиспользован, а не
@@ -15,16 +14,29 @@
 между строками — это и есть ответ на вопрос, ради которого пакет написан:
 сколько шагов, сколько секунд, сколько долларов стоит слой.
 
-Правила обращения с чужим Chrome (нарушать нельзя, ими уже терялись чужие
-вкладки): свою вкладку сервер получает навигацией с `new_tab=True` на
-уникальный маркер, её target_id запоминается, закрывается в конце ТОЛЬКО он.
-Множество чужих вкладок снимается до старта и сверяется после.
+ПРАВИЛА ОБРАЩЕНИЯ С ЧУЖИМ CHROME. Нарушать нельзя: одним нарушением уже
+терялась чужая вкладка, другим — окно браузера выскакивало поверх работы
+владельца и забирало фокус.
+
+1. Своего браузера `bu_eval` не поднимает ВООБЩЕ, ни один бэкенд. Ветки запуска
+   в пакете нет, поэтому окна не может быть ни при каком флаге и ни при какой
+   переменной окружения. Браузер поднимает `scripts/chrome-automation.sh`
+   (headless), харнесс к нему подключается по `cdp_url` — см. `attached_profile`.
+2. Вкладки закрываются строго по своим target_id: у MCP-бэкендов — по маркеру,
+   у baseline — по разнице снимков «до» и «после». Никогда по признаку
+   «текущая».
+3. Пустая чужая вкладка может быть взята взаймы (browser-use навигирует в неё
+   вместо открытия новой) — тогда она не закрывается, а возвращается на
+   about:blank.
+4. Геометрия чужих вкладок не трогается: viewport-override снимается вручную,
+   см. `attached_profile`.
 """
 
 from __future__ import annotations
 
 import asyncio
 import os
+import sys
 import time
 import urllib.request
 import uuid
@@ -88,7 +100,7 @@ class RunReport:
 class Backend(Protocol):
 	name: str
 
-	async def run(self, task: Task, model: str, profile: Profile, max_steps: int, headless: bool) -> RunReport: ...
+	async def run(self, task: Task, model: str, profile: Profile, max_steps: int) -> RunReport: ...
 
 
 # --------------------------------------------------------------------------- #
@@ -96,17 +108,80 @@ class Backend(Protocol):
 # --------------------------------------------------------------------------- #
 
 
+CDP_DEFAULT = 'http://127.0.0.1:9222'
+
+#: Пустые страницы, в которые browser-use навигирует ВМЕСТО открытия новой
+#: вкладки. Из-за этого `new_tab=True` может приземлиться на уже существующий
+#: пустой таб — не чужую работу, но и не нашу собственность.
+_BLANK_URLS = ('', 'about:blank', 'chrome://newtab/', 'chrome://new-tab-page/', 'chrome://new-tab-page-third-party/')
+
+
+def cdp_url() -> str:
+	"""Адрес уже работающего Chrome автоматизации.
+
+	`BU_MCP_CDP_URL` читается вторым, чтобы харнесс и сервер по умолчанию
+	смотрели в один и тот же браузер и сравнение шло на одной машине.
+	"""
+	return os.getenv('BU_EVAL_CDP_URL') or os.getenv('BU_MCP_CDP_URL') or CDP_DEFAULT
+
+
+def attached_profile():
+	"""Профиль ПОДКЛЮЧЕНИЯ к чужому Chrome. Своего браузера `bu_eval` не поднимает никогда.
+
+	Почему пути запуска здесь нет вовсе. `browser_use.Agent` строит
+	`BrowserProfile` сам и мимо `~/.config/browseruse/config.json`, а при
+	`headless=None` значение выводится из наличия дисплея — на машине владельца
+	это `False`, то есть окно поверх всего и украденный фокус на каждой вкладке.
+	Один забытый флаг в оценочном коде не должен этого стоить, поэтому ветку
+	запуска мы просто не держим: браузер поднимает `scripts/chrome-automation.sh`
+	(headless), а харнесс к нему присоединяется.
+
+	`headless=True` проставляется явно всё равно — на случай, если `cdp_url`
+	окажется недостижимым и browser-use решит поднять браузер сам.
+
+	Про viewport — та же побочка, что обойдена в `bu_mcp/server.py::_profile`, и
+	обойдена она здесь по той же причине: `headless=True` тянет за собой
+	`viewport=screen` и `no_viewport=False`, после чего browser-use шлёт
+	`Emulation.setDeviceMetricsOverride` на каждую вкладку, которую создаёт ИЛИ
+	на которую переводит фокус, — включая ЧУЖИЕ вкладки владельца, потому что
+	фокус он переводит и сам, на соседнюю вкладку, когда наша отсоединяется.
+	Менять геометрию в чужой вкладке мы себе не позволяем, поэтому возвращаем
+	`viewport=None` / `no_viewport=True`.
+
+	`keep_alive=True` — третья половица того же: без неё выход из сессии сбросил
+	бы Chrome, который завели не мы.
+	"""
+	from browser_use.browser import BrowserProfile
+
+	profile = BrowserProfile(cdp_url=cdp_url(), is_local=True, headless=True, keep_alive=True)
+	if profile.viewport is not None and not profile.no_viewport:
+		try:
+			profile.viewport = None
+			profile.no_viewport = True
+		except Exception as exc:  # noqa: BLE001
+			print(f'[bu_eval] не смог снять viewport-override с чужого браузера: {exc!r}', file=sys.stderr)
+	return profile
+
+
 class BrowserUseBackend:
-	"""Апстримный `Agent` со своим браузером. Наш слой здесь не участвует вовсе."""
+	"""Апстримный `Agent`, подключённый к тому же headless Chrome, что и наш слой.
+
+	Наш слой здесь не участвует вовсе — это база сравнения. Общий браузер не
+	только безопаснее (окна не будет ни при каких флагах), но и честнее: обе
+	строки матрицы меряются на одной и той же машине и одном и том же Chrome.
+	"""
 
 	name = 'browser-use'
 
-	async def run(self, task: Task, model: str, profile: Profile, max_steps: int, headless: bool = True) -> RunReport:
-		from browser_use import Agent, Browser
+	async def run(self, task: Task, model: str, profile: Profile, max_steps: int) -> RunReport:
+		from browser_use import Agent
+		from browser_use.browser import BrowserSession
+		from bu_mcp.bench import cdp_pages
 
 		rep = RunReport(task=task.name, model=model, profile=profile.name, backend=self.name)
 		started = time.time()
-		browser = Browser(headless=headless)
+		foreign = {t['id']: (t.get('url') or '') for t in cdp_pages()}
+		browser = BrowserSession(browser_profile=attached_profile())
 		try:
 			agent = Agent(
 				task=task.prompt,
@@ -134,11 +209,56 @@ class BrowserUseBackend:
 			rep.errors.append(repr(exc))
 			rep.stopped = 'error'
 		finally:
-			await browser.kill()
+			# stop(), а НЕ kill(): kill шлёт BrowserStopEvent(force=True), который
+			# проходит мимо гарда keep_alive и погасил бы чужой Chrome целиком.
+			try:
+				await browser.stop()
+			except Exception as exc:  # noqa: BLE001
+				rep.errors.append(f'сессия не закрылась чисто: {exc!r}')
+			await _restore_tabs(foreign, rep)
 
 		rep.seconds = time.time() - started
 		rep.price(model)
 		return rep
+
+
+async def _restore_tabs(foreign: dict[str, str], rep: RunReport) -> None:
+	"""Вернуть браузер в то состояние, в котором мы его взяли.
+
+	Апстримный `Agent` открывает вкладки сам и в общем браузере за собой не
+	убирает, а `stop()` при `keep_alive=True` до уборки и не доходит. Разница
+	снимков «до» и «после» — единственный признак собственности, которому здесь
+	можно верить: закрывать по признаку «текущая» нельзя, так уже терялась
+	чужая вкладка.
+
+	Два случая, и путать их нельзя:
+
+	* вкладки, которых в снимке «до» не было, — наши, закрываем по target_id;
+	* вкладка, которая БЫЛА и была пустой, а теперь показывает страницу, —
+	  взята взаймы: `new_tab=True` у browser-use навигирует в существующий
+	  пустой таб вместо открытия нового (замерено). Её не закрываем — открывали
+	  не мы, — а возвращаем на about:blank.
+	"""
+	from bu_mcp.bench import cdp_eval, cdp_pages
+
+	try:
+		now = {t['id']: (t.get('url') or '') for t in cdp_pages()}
+	except Exception:  # noqa: BLE001
+		return
+	for tid, url in now.items():
+		if tid not in foreign:
+			try:
+				urllib.request.urlopen(f'{cdp_url()}/json/close/{tid}', timeout=10).read()  # noqa: ASYNC210 — уборка, вне измеряемого пути
+			except Exception as exc:  # noqa: BLE001
+				rep.errors.append(f'не закрылась своя вкладка {tid[:8]}: {exc!r}')
+		elif foreign[tid] in _BLANK_URLS and url not in _BLANK_URLS:
+			try:
+				await cdp_eval(tid, "window.location.replace('about:blank')")
+			except Exception as exc:  # noqa: BLE001
+				rep.errors.append(f'не вернул взятую взаймы вкладку {tid[:8]} на about:blank: {exc!r}')
+	lost = [tid[:8] for tid in foreign if tid not in now]
+	if lost:
+		rep.errors.append(f'ВНИМАНИЕ: пропали чужие вкладки {lost}')
 
 
 # --------------------------------------------------------------------------- #
@@ -156,7 +276,7 @@ class BuMcpBackend:
 
 	name = 'bu-mcp'
 
-	async def run(self, task: Task, model: str, profile: Profile, max_steps: int, headless: bool = True) -> RunReport:
+	async def run(self, task: Task, model: str, profile: Profile, max_steps: int) -> RunReport:
 		# Импорт здесь, а не наверху: bu_mcp.bench тянет websockets и browser_use,
 		# а базовому бэкенду он не нужен вовсе.
 		from bu_eval.loop import ToolSpec, done_spec, run_anthropic, run_openai
@@ -226,7 +346,7 @@ class ScriptedBackend:
 
 	name = 'scripted'
 
-	async def run(self, task: Task, model: str, profile: Profile, max_steps: int, headless: bool = True) -> RunReport:
+	async def run(self, task: Task, model: str, profile: Profile, max_steps: int) -> RunReport:
 		rep = RunReport(task=task.name, model='—', profile=profile.name, backend=self.name)
 		started = time.time()
 		if task.script is None:
@@ -295,12 +415,6 @@ async def mcp_session(profile: Profile, rep: RunReport):
 	finally:
 		await client.kill()
 		await _release_own_tab(CDP_URL, own_tab, reused, foreign, rep)
-
-
-#: Пустые страницы, в которые browser-use навигирует ВМЕСТО открытия новой
-#: вкладки. Из-за этого `new_tab=True` может приземлиться на уже существующий
-#: пустой таб — не чужую работу, но и не нашу собственность.
-_BLANK_URLS = ('', 'about:blank', 'chrome://newtab/', 'chrome://new-tab-page/', 'chrome://new-tab-page-third-party/')
 
 
 async def _bind_own_tab(client, foreign: dict[str, str]) -> tuple[str, bool]:

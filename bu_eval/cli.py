@@ -9,6 +9,9 @@
 
 Прогоны стоят денег. Матрица печатает свой размер до старта, а `--dry-run`
 показывает ячейки и не тратит ни цента.
+
+Браузер нужен уже работающий и headless: `scripts/chrome-automation.sh` без
+флагов. Флага «показать браузер» у харнесса нет намеренно — см. `backends.py`.
 """
 
 from __future__ import annotations
@@ -103,7 +106,6 @@ def cmd_run(args) -> int:
 		backends=args.backend or ['bu-mcp'],
 		repeats=args.repeats,
 		max_steps=args.max_steps,
-		headless=not args.headed,
 		verify=not args.no_verify,
 	)
 	cells = mx.cells()
@@ -151,7 +153,6 @@ def main(argv=None) -> int:
 	r.add_argument('--out', default='', help='куда сложить JSON с прогонами')
 	r.add_argument('--with-data', action='store_true', help='класть в JSON и сами извлечённые данные')
 	r.add_argument('--md', action='store_true', help='ещё и markdown-таблица')
-	r.add_argument('--headed', action='store_true', help='показывать браузер (только бэкенд browser-use)')
 	r.add_argument('--no-verify', action='store_true')
 	r.add_argument('--dry-run', action='store_true', help='показать ячейки матрицы и не тратить денег')
 	r.set_defaults(fn=cmd_run)
