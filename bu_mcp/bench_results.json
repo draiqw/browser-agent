@@ -1,0 +1,4993 @@
+{
+  "started": "2026-09-03 12:55:12",
+  "cdp_url": "http://127.0.0.1:9222",
+  "python": "/Users/draiqws/browser-use/.venv/bin/python",
+  "repeats": 3,
+  "sites": {
+    "wikipedia": {
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "source": "control"
+    },
+    "allrecipes": {
+      "url": "https://www.allrecipes.com/",
+      "source": "webvoyager"
+    },
+    "amazon": {
+      "url": "https://www.amazon.com/",
+      "source": "webvoyager"
+    },
+    "apple": {
+      "url": "https://www.apple.com/",
+      "source": "webvoyager"
+    },
+    "arxiv": {
+      "url": "https://arxiv.org/",
+      "source": "webvoyager"
+    },
+    "github": {
+      "url": "https://github.com/",
+      "source": "webvoyager"
+    },
+    "espn": {
+      "url": "https://www.espn.com/",
+      "source": "webvoyager"
+    },
+    "coursera": {
+      "url": "https://www.coursera.org/",
+      "source": "webvoyager"
+    },
+    "cambridge_dict": {
+      "url": "https://dictionary.cambridge.org/",
+      "source": "webvoyager"
+    },
+    "bbc_news": {
+      "url": "https://www.bbc.com/news",
+      "source": "webvoyager"
+    },
+    "huggingface": {
+      "url": "https://huggingface.co/",
+      "source": "webvoyager"
+    },
+    "wolframalpha": {
+      "url": "https://www.wolframalpha.com/",
+      "source": "webvoyager"
+    },
+    "google_maps": {
+      "url": "https://www.google.com/maps",
+      "source": "webvoyager"
+    },
+    "google_flights": {
+      "url": "https://www.google.com/travel/flights",
+      "source": "webvoyager"
+    },
+    "real_omnizon": {
+      "url": "https://real-omnizon.vercel.app/",
+      "source": "real"
+    },
+    "real_udriver": {
+      "url": "https://real-udriver.vercel.app/",
+      "source": "real"
+    }
+  },
+  "servers": {
+    "stock": {
+      "label": "stock browser_use.mcp",
+      "argv": [
+        "/Users/draiqws/browser-use/.venv/bin/python",
+        "-m",
+        "browser_use.mcp"
+      ],
+      "env": {}
+    },
+    "ours": {
+      "label": "bu_mcp.server",
+      "argv": [
+        "/Users/draiqws/browser-use/.venv/bin/python",
+        "-m",
+        "bu_mcp.server"
+      ],
+      "env": {
+        "PYTHONPATH": "/Users/draiqws/browser-use",
+        "BU_MCP_CDP_URL": "http://127.0.0.1:9222"
+      }
+    }
+  },
+  "runs": [
+    {
+      "nav_s": 1.021,
+      "state_s": 0.218,
+      "chars": 12425,
+      "elements": 85,
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "title": "en.wikipedia.org/wiki/Main_Page",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "wikipedia",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.008,
+      "state_s": 0.19,
+      "chars": 11856,
+      "elements": 89,
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "title": "en.wikipedia.org/wiki/Main_Page",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.515,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 4DBB555E -> 45866F54"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 45866F54"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "wikipedia",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.032,
+      "state_s": 0.017,
+      "chars": 910,
+      "elements": 4,
+      "url": "https://www.allrecipes.com/",
+      "title": "allrecipes.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.507,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "new document: loaderId 45866F54 -> 3957EE02"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 3957EE02"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.101,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.101,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.304,
+            "detail": "DOM quiet for 303ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "allrecipes",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.234,
+      "state_s": 0.043,
+      "chars": 1186,
+      "elements": 4,
+      "url": "https://www.allrecipes.com/",
+      "title": "allrecipes.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "allrecipes",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.89,
+      "state_s": 0.347,
+      "chars": 19128,
+      "elements": 108,
+      "url": "https://www.amazon.com/",
+      "title": "amazon.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "amazon",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 2.074,
+      "state_s": 0.31,
+      "chars": 17676,
+      "elements": 111,
+      "url": "https://www.amazon.com/",
+      "title": "amazon.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.52,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 3957EE02 -> 7B92AB5A"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 7B92AB5A"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.109,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "amazon",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 3.275,
+      "state_s": 0.137,
+      "chars": 1880,
+      "elements": 18,
+      "url": "https://www.apple.com/",
+      "title": "apple.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.515,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "new document: loaderId 7B92AB5A -> 6C9CB7F0"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 6C9CB7F0"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.308,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "apple",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.475,
+      "state_s": 0.273,
+      "chars": 2354,
+      "elements": 19,
+      "url": "https://www.apple.com/",
+      "title": "apple.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "apple",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.556,
+      "state_s": 0.112,
+      "chars": 27500,
+      "elements": 217,
+      "url": "https://arxiv.org/",
+      "title": "arxiv.org",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "arxiv",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.842,
+      "state_s": 0.089,
+      "chars": 16809,
+      "elements": 217,
+      "url": "https://arxiv.org/",
+      "title": "arxiv.org",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.51,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 6C9CB7F0 -> B72642EB"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId B72642EB"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.305,
+            "detail": "DOM quiet for 304ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "arxiv",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 3.844,
+      "state_s": 0.235,
+      "chars": 2444,
+      "elements": 19,
+      "url": "https://github.com/",
+      "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.525,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId B72642EB -> 502079E0"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 502079E0"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.113,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.308,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "github",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.79,
+      "state_s": 0.449,
+      "chars": 2389,
+      "elements": 19,
+      "url": "https://github.com/",
+      "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "github",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 2.025,
+      "state_s": 0.042,
+      "chars": 693,
+      "elements": 0,
+      "url": "https://www.espn.com/",
+      "title": "espn.com",
+      "outcome": "empty",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "espn",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 17.918,
+      "state_s": 0.264,
+      "chars": 6051,
+      "elements": 31,
+      "url": "https://www.espn.co.uk/",
+      "title": "ESPN United Kingdom - Serving Sports Fans. Anytime. Anywhere.",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.52,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 502079E0 -> C4A1DD24"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId C4A1DD24"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.313,
+            "detail": "DOM quiet for 311ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "espn",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 3.305,
+      "state_s": 0.265,
+      "chars": 12784,
+      "elements": 166,
+      "url": "https://www.coursera.org/",
+      "title": "Coursera | Online Courses, Certificates, & Degrees",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 1.161,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId C4A1DD24 -> 5E610801"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 5E610801"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.752,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "coursera",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.599,
+      "state_s": 0.4,
+      "chars": 4166,
+      "elements": 36,
+      "url": "https://www.coursera.org/",
+      "title": "Coursera | Online Courses, Certificates, & Degrees",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "coursera",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 8.791,
+      "state_s": 0.2,
+      "chars": 3712,
+      "elements": 28,
+      "url": "https://dictionary.cambridge.org/",
+      "title": "Cambridge Dictionary | English Dictionary, Translations & Thesaurus",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "cambridge_dict",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 8.938,
+      "state_s": 0.097,
+      "chars": 4117,
+      "elements": 28,
+      "url": "https://dictionary.cambridge.org/",
+      "title": "Cambridge Dictionary | English Dictionary, Translations & Thesaurus",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.511,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 5E610801 -> F9B1A2A5"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId F9B1A2A5"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.104,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.304,
+            "detail": "DOM quiet for 303ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "cambridge_dict",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 4.855,
+      "state_s": 0.135,
+      "chars": 6929,
+      "elements": 34,
+      "url": "https://www.bbc.com/news",
+      "title": "BBC News - Breaking news, video and the latest top stories from the U.S. and around the world",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.515,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId F9B1A2A5 -> 4DBB76C4"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 4DBB76C4"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "bbc_news",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.598,
+      "state_s": 0.294,
+      "chars": 3541,
+      "elements": 27,
+      "url": "https://www.bbc.com/news",
+      "title": "BBC News - Breaking news, video and the latest top stories from the U.S. and around the world",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "bbc_news",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.765,
+      "state_s": 0.146,
+      "chars": 2474,
+      "elements": 19,
+      "url": "https://huggingface.co/",
+      "title": "huggingface.co",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "huggingface",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.32,
+      "state_s": 0.111,
+      "chars": 1742,
+      "elements": 19,
+      "url": "https://huggingface.co/",
+      "title": "huggingface.co",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.516,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 4DBB76C4 -> 2AADECE1"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 2AADECE1"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.101,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "huggingface",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 2.019,
+      "state_s": 0.072,
+      "chars": 6245,
+      "elements": 85,
+      "url": "https://www.wolframalpha.com/",
+      "title": "Wolfram|Alpha: Computational Intelligence",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.511,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 2AADECE1 -> 11BF9FDE"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 11BF9FDE"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.304,
+            "detail": "DOM quiet for 303ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "wolframalpha",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.821,
+      "state_s": 0.096,
+      "chars": 10544,
+      "elements": 84,
+      "url": "https://www.wolframalpha.com/",
+      "title": "Wolfram|Alpha: Computational Intelligence",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "wolframalpha",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.725,
+      "state_s": 0.13,
+      "chars": 1277,
+      "elements": 8,
+      "url": "https://www.google.com/maps",
+      "title": "Google Maps",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "google_maps",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 2.373,
+      "state_s": 0.092,
+      "chars": 2813,
+      "elements": 47,
+      "url": "https://www.google.com/maps",
+      "title": "Google Maps",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 1.534,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.002,
+            "detail": "new document: loaderId 11BF9FDE -> BAC4C348"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId BAC4C348"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.114,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.129,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 1.29,
+            "detail": "DOM quiet for 306ms after 38 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "google_maps",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.91,
+      "state_s": 0.289,
+      "chars": 5755,
+      "elements": 71,
+      "url": "https://www.google.com/travel/flights",
+      "title": "Find Cheap Flights Worldwide & Book Your Ticket - Google Flights",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.514,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId BAC4C348 -> 6B88AA86"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 6B88AA86"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "google_flights",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.842,
+      "state_s": 0.214,
+      "chars": 7026,
+      "elements": 71,
+      "url": "https://www.google.com/travel/flights",
+      "title": "Find Cheap Flights Worldwide & Book Your Ticket - Google Flights",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "google_flights",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.436,
+      "state_s": 0.214,
+      "chars": 8812,
+      "elements": 109,
+      "url": "https://real-omnizon.vercel.app/",
+      "title": "Omnizon - Online Shopping for Electronics, Apparel, and More",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "real_omnizon",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.01,
+      "state_s": 0.059,
+      "chars": 6181,
+      "elements": 109,
+      "url": "https://real-omnizon.vercel.app/",
+      "title": "Omnizon - Online Shopping for Electronics, Apparel, and More",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.514,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 6B88AA86 -> 29F095FB"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 29F095FB"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.104,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "real_omnizon",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.189,
+      "state_s": 0.026,
+      "chars": 1639,
+      "elements": 17,
+      "url": "https://real-udriver.vercel.app/",
+      "title": "real-udriver.vercel.app",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.511,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "new document: loaderId 29F095FB -> A594BD33"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId A594BD33"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.304,
+            "detail": "DOM quiet for 303ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "real_udriver",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 0.323,
+      "state_s": 0.068,
+      "chars": 2040,
+      "elements": 17,
+      "url": "https://real-udriver.vercel.app/",
+      "title": "real-udriver.vercel.app",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "real_udriver",
+      "repeat": 0,
+      "cold": true
+    },
+    {
+      "nav_s": 1.248,
+      "state_s": 0.295,
+      "chars": 11785,
+      "elements": 89,
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "title": "en.wikipedia.org/wiki/Main_Page",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.516,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId A594BD33 -> 34E0C726"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 34E0C726"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "wikipedia",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.362,
+      "state_s": 0.195,
+      "chars": 12419,
+      "elements": 85,
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "title": "en.wikipedia.org/wiki/Main_Page",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "wikipedia",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.569,
+      "state_s": 0.047,
+      "chars": 1215,
+      "elements": 4,
+      "url": "https://www.allrecipes.com/",
+      "title": "allrecipes.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "allrecipes",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.122,
+      "state_s": 0.017,
+      "chars": 913,
+      "elements": 4,
+      "url": "https://www.allrecipes.com/",
+      "title": "allrecipes.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.507,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "new document: loaderId 34E0C726 -> 4151802B"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 4151802B"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.101,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.304,
+            "detail": "DOM quiet for 303ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "allrecipes",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.293,
+      "state_s": 0.373,
+      "chars": 17864,
+      "elements": 111,
+      "url": "https://www.amazon.com/",
+      "title": "amazon.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.518,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 4151802B -> 158ED4D1"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 158ED4D1"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.109,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "amazon",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.362,
+      "state_s": 0.557,
+      "chars": 18254,
+      "elements": 100,
+      "url": "https://www.amazon.com/",
+      "title": "amazon.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "amazon",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.152,
+      "state_s": 0.567,
+      "chars": 2364,
+      "elements": 19,
+      "url": "https://www.apple.com/",
+      "title": "apple.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "apple",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.397,
+      "state_s": 0.193,
+      "chars": 1892,
+      "elements": 18,
+      "url": "https://www.apple.com/",
+      "title": "apple.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.622,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 158ED4D1 -> 7796DA96"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 7796DA96"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.107,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.41,
+            "detail": "DOM quiet for 396ms after 1 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "apple",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.952,
+      "state_s": 0.232,
+      "chars": 16795,
+      "elements": 217,
+      "url": "https://arxiv.org/",
+      "title": "arxiv.org",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.519,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 7796DA96 -> 19D69878"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 19D69878"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.312,
+            "detail": "DOM quiet for 310ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "arxiv",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.413,
+      "state_s": 0.134,
+      "chars": 27496,
+      "elements": 217,
+      "url": "https://arxiv.org/",
+      "title": "arxiv.org",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "arxiv",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.344,
+      "state_s": 0.483,
+      "chars": 2326,
+      "elements": 19,
+      "url": "https://github.com/",
+      "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "github",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.075,
+      "state_s": 0.233,
+      "chars": 2457,
+      "elements": 19,
+      "url": "https://github.com/",
+      "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.532,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 19D69878 -> 2D62516F"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 2D62516F"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.117,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.311,
+            "detail": "DOM quiet for 309ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "github",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 9.312,
+      "state_s": 0.297,
+      "chars": 6032,
+      "elements": 31,
+      "url": "https://www.espn.co.uk/",
+      "title": "ESPN United Kingdom - Serving Sports Fans. Anytime. Anywhere.",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.518,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 2D62516F -> E84424CC"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId E84424CC"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.107,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "espn",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 8.326,
+      "state_s": 0.375,
+      "chars": 6263,
+      "elements": 35,
+      "url": "https://www.espn.co.uk/",
+      "title": "ESPN United Kingdom - Serving Sports Fans. Anytime. Anywhere.",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "espn",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.575,
+      "state_s": 0.507,
+      "chars": 4175,
+      "elements": 36,
+      "url": "https://www.coursera.org/",
+      "title": "Coursera | Online Courses, Certificates, & Degrees",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "coursera",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.266,
+      "state_s": 0.351,
+      "chars": 12801,
+      "elements": 166,
+      "url": "https://www.coursera.org/",
+      "title": "Coursera | Online Courses, Certificates, & Degrees",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.524,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId E84424CC -> 33D666D9"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 33D666D9"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.112,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.309,
+            "detail": "DOM quiet for 307ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "coursera",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.208,
+      "state_s": 0.147,
+      "chars": 4092,
+      "elements": 28,
+      "url": "https://dictionary.cambridge.org/",
+      "title": "Cambridge Dictionary | English Dictionary, Translations & Thesaurus",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.824,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 33D666D9 -> A4D97D79"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId A4D97D79"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.107,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.612,
+            "detail": "DOM quiet for 369ms after 1 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "cambridge_dict",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.121,
+      "state_s": 0.213,
+      "chars": 3743,
+      "elements": 28,
+      "url": "https://dictionary.cambridge.org/",
+      "title": "Cambridge Dictionary | English Dictionary, Translations & Thesaurus",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "cambridge_dict",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.777,
+      "state_s": 0.4,
+      "chars": 3524,
+      "elements": 27,
+      "url": "https://www.bbc.com/news",
+      "title": "BBC News - Breaking news, video and the latest top stories from the U.S. and around the world",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "bbc_news",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.105,
+      "state_s": 0.163,
+      "chars": 6936,
+      "elements": 34,
+      "url": "https://www.bbc.com/news",
+      "title": "BBC News - Breaking news, video and the latest top stories from the U.S. and around the world",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.519,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId A4D97D79 -> CF9E5072"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId CF9E5072"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.109,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "bbc_news",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.738,
+      "state_s": 0.172,
+      "chars": 1728,
+      "elements": 19,
+      "url": "https://huggingface.co/",
+      "title": "huggingface.co",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.517,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId CF9E5072 -> D74773C2"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId D74773C2"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.107,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "huggingface",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.692,
+      "state_s": 0.404,
+      "chars": 2394,
+      "elements": 19,
+      "url": "https://huggingface.co/",
+      "title": "huggingface.co",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "huggingface",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.847,
+      "state_s": 0.109,
+      "chars": 10511,
+      "elements": 84,
+      "url": "https://www.wolframalpha.com/",
+      "title": "Wolfram|Alpha: Computational Intelligence",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "wolframalpha",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 1.73,
+      "state_s": 0.137,
+      "chars": 6269,
+      "elements": 85,
+      "url": "https://www.wolframalpha.com/",
+      "title": "Wolfram|Alpha: Computational Intelligence",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.519,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId D74773C2 -> 3DB27A34"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 3DB27A34"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.309,
+            "detail": "DOM quiet for 307ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "wolframalpha",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.484,
+      "state_s": 0.077,
+      "chars": 2795,
+      "elements": 47,
+      "url": "https://www.google.com/maps",
+      "title": "Google Maps",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 1.607,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 3DB27A34 -> 632000A9"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 632000A9"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 1.395,
+            "detail": "DOM quiet for 344ms after 36 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "google_maps",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.869,
+      "state_s": 0.144,
+      "chars": 1245,
+      "elements": 8,
+      "url": "https://www.google.com/maps",
+      "title": "Google Maps",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "google_maps",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 2.162,
+      "state_s": 0.249,
+      "chars": 7024,
+      "elements": 71,
+      "url": "https://www.google.com/travel/flights",
+      "title": "Find Cheap Flights Worldwide & Book Your Ticket - Google Flights",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "google_flights",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 3.601,
+      "state_s": 0.22,
+      "chars": 5700,
+      "elements": 71,
+      "url": "https://www.google.com/travel/flights",
+      "title": "Find Cheap Flights Worldwide & Book Your Ticket - Google Flights",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.535,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 632000A9 -> 37A6848F"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 37A6848F"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.324,
+            "detail": "DOM quiet for 322ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "google_flights",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.998,
+      "state_s": 0.06,
+      "chars": 6171,
+      "elements": 109,
+      "url": "https://real-omnizon.vercel.app/",
+      "title": "Omnizon - Online Shopping for Electronics, Apparel, and More",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.515,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 37A6848F -> 7D00074A"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 7D00074A"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.104,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "real_omnizon",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.406,
+      "state_s": 0.101,
+      "chars": 8803,
+      "elements": 109,
+      "url": "https://real-omnizon.vercel.app/",
+      "title": "Omnizon - Online Shopping for Electronics, Apparel, and More",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "real_omnizon",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.393,
+      "state_s": 0.069,
+      "chars": 2077,
+      "elements": 17,
+      "url": "https://real-udriver.vercel.app/",
+      "title": "real-udriver.vercel.app",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "real_udriver",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.888,
+      "state_s": 0.03,
+      "chars": 1654,
+      "elements": 17,
+      "url": "https://real-udriver.vercel.app/",
+      "title": "real-udriver.vercel.app",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.51,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 7D00074A -> 18520573"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 18520573"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.305,
+            "detail": "DOM quiet for 304ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "real_udriver",
+      "repeat": 1,
+      "cold": false
+    },
+    {
+      "nav_s": 0.354,
+      "state_s": 0.232,
+      "chars": 12404,
+      "elements": 85,
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "title": "en.wikipedia.org/wiki/Main_Page",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "wikipedia",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.093,
+      "state_s": 0.334,
+      "chars": 11851,
+      "elements": 89,
+      "url": "https://en.wikipedia.org/wiki/Main_Page",
+      "title": "en.wikipedia.org/wiki/Main_Page",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.52,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 18520573 -> B4225345"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId B4225345"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.107,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.104,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.309,
+            "detail": "DOM quiet for 307ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "wikipedia",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.987,
+      "state_s": 0.017,
+      "chars": 910,
+      "elements": 4,
+      "url": "https://www.allrecipes.com/",
+      "title": "allrecipes.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.507,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "new document: loaderId B4225345 -> 8551A9BD"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 8551A9BD"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.101,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.101,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.304,
+            "detail": "DOM quiet for 303ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "allrecipes",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.195,
+      "state_s": 0.049,
+      "chars": 1186,
+      "elements": 4,
+      "url": "https://www.allrecipes.com/",
+      "title": "allrecipes.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "allrecipes",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.25,
+      "state_s": 0.524,
+      "chars": 18687,
+      "elements": 101,
+      "url": "https://www.amazon.com/",
+      "title": "amazon.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "amazon",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 2.343,
+      "state_s": 0.403,
+      "chars": 17652,
+      "elements": 111,
+      "url": "https://www.amazon.com/",
+      "title": "amazon.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.521,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 8551A9BD -> FD7710FC"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId FD7710FC"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.112,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.306,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "amazon",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 2.211,
+      "state_s": 0.159,
+      "chars": 1881,
+      "elements": 18,
+      "url": "https://www.apple.com/",
+      "title": "apple.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.622,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId FD7710FC -> 9EA7203A"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 9EA7203A"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.107,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.408,
+            "detail": "DOM quiet for 360ms after 5 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "apple",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.832,
+      "state_s": 0.265,
+      "chars": 2362,
+      "elements": 19,
+      "url": "https://www.apple.com/",
+      "title": "apple.com",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "apple",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.801,
+      "state_s": 0.131,
+      "chars": 27496,
+      "elements": 217,
+      "url": "https://arxiv.org/",
+      "title": "arxiv.org",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "arxiv",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.083,
+      "state_s": 0.111,
+      "chars": 16808,
+      "elements": 217,
+      "url": "https://arxiv.org/",
+      "title": "arxiv.org",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.514,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 9EA7203A -> 0AD0A808"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 0AD0A808"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "arxiv",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 2.865,
+      "state_s": 0.198,
+      "chars": 2444,
+      "elements": 19,
+      "url": "https://github.com/",
+      "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.527,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 0AD0A808 -> 5C0D7586"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 5C0D7586"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.115,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "github",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.754,
+      "state_s": 0.551,
+      "chars": 2389,
+      "elements": 19,
+      "url": "https://github.com/",
+      "title": "GitHub · Change is constant. GitHub keeps you ahead. · GitHub",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "github",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 8.689,
+      "state_s": 0.176,
+      "chars": 6269,
+      "elements": 35,
+      "url": "https://www.espn.co.uk/",
+      "title": "ESPN United Kingdom - Serving Sports Fans. Anytime. Anywhere.",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "espn",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 9.418,
+      "state_s": 0.155,
+      "chars": 6053,
+      "elements": 31,
+      "url": "https://www.espn.co.uk/",
+      "title": "ESPN United Kingdom - Serving Sports Fans. Anytime. Anywhere.",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.517,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 5C0D7586 -> 57E4B093"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 57E4B093"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.102,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 305ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "espn",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 2.164,
+      "state_s": 0.492,
+      "chars": 12787,
+      "elements": 166,
+      "url": "https://www.coursera.org/",
+      "title": "Coursera | Online Courses, Certificates, & Degrees",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.522,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.002,
+            "detail": "new document: loaderId 57E4B093 -> 31F5C632"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 31F5C632"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.109,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.308,
+            "detail": "DOM quiet for 307ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "coursera",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.326,
+      "state_s": 0.503,
+      "chars": 4166,
+      "elements": 36,
+      "url": "https://www.coursera.org/",
+      "title": "Coursera | Online Courses, Certificates, & Degrees",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "coursera",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.123,
+      "state_s": 0.292,
+      "chars": 3718,
+      "elements": 28,
+      "url": "https://dictionary.cambridge.org/",
+      "title": "Cambridge Dictionary | English Dictionary, Translations & Thesaurus",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "cambridge_dict",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.689,
+      "state_s": 0.158,
+      "chars": 4117,
+      "elements": 28,
+      "url": "https://dictionary.cambridge.org/",
+      "title": "Cambridge Dictionary | English Dictionary, Translations & Thesaurus",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.517,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 31F5C632 -> B59D8C36"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId B59D8C36"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.106,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.103,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.307,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "cambridge_dict",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 2.401,
+      "state_s": 0.479,
+      "chars": 6945,
+      "elements": 34,
+      "url": "https://www.bbc.com/news",
+      "title": "BBC News - Breaking news, video and the latest top stories from the U.S. and around the world",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.524,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId B59D8C36 -> EBD53D44"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId EBD53D44"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.111,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.104,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.309,
+            "detail": "DOM quiet for 307ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "bbc_news",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.812,
+      "state_s": 0.801,
+      "chars": 3541,
+      "elements": 27,
+      "url": "https://www.bbc.com/news",
+      "title": "BBC News - Breaking news, video and the latest top stories from the U.S. and around the world",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "bbc_news",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.673,
+      "state_s": 0.181,
+      "chars": 2474,
+      "elements": 19,
+      "url": "https://huggingface.co/",
+      "title": "huggingface.co",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "huggingface",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.405,
+      "state_s": 0.327,
+      "chars": 1742,
+      "elements": 19,
+      "url": "https://huggingface.co/",
+      "title": "huggingface.co",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.574,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId EBD53D44 -> 5BA4FB43"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 5BA4FB43"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.111,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.113,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.349,
+            "detail": "DOM quiet for 342ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "huggingface",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 2.417,
+      "state_s": 0.264,
+      "chars": 6438,
+      "elements": 87,
+      "url": "https://www.wolframalpha.com/",
+      "title": "Wolfram|Alpha: Computational Intelligence",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.672,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.016,
+            "detail": "new document: loaderId 5BA4FB43 -> D71F925B"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId D71F925B"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.116,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.109,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.432,
+            "detail": "DOM quiet for 383ms after 1 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "wolframalpha",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.013,
+      "state_s": 0.238,
+      "chars": 10544,
+      "elements": 84,
+      "url": "https://www.wolframalpha.com/",
+      "title": "Wolfram|Alpha: Computational Intelligence",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "wolframalpha",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.1,
+      "state_s": 0.219,
+      "chars": 1277,
+      "elements": 8,
+      "url": "https://www.google.com/maps",
+      "title": "Google Maps",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "google_maps",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 3.651,
+      "state_s": 0.179,
+      "chars": 2808,
+      "elements": 47,
+      "url": "https://www.google.com/maps",
+      "title": "Google Maps",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 1.334,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.002,
+            "detail": "new document: loaderId D71F925B -> 9F299BB7"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId 9F299BB7"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.195,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.179,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.958,
+            "detail": "DOM quiet for 325ms after 20 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "google_maps",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 2.502,
+      "state_s": 0.355,
+      "chars": 5755,
+      "elements": 71,
+      "url": "https://www.google.com/travel/flights",
+      "title": "Find Cheap Flights Worldwide & Book Your Ticket - Google Flights",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.522,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId 9F299BB7 -> D00564B2"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId D00564B2"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.108,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.309,
+            "detail": "DOM quiet for 306ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "google_flights",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.661,
+      "state_s": 0.463,
+      "chars": 6783,
+      "elements": 69,
+      "url": "https://www.google.com/travel/flights",
+      "title": "Find Cheap Flights Worldwide & Book Your Ticket - Google Flights",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "google_flights",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.708,
+      "state_s": 0.175,
+      "chars": 8813,
+      "elements": 109,
+      "url": "https://real-omnizon.vercel.app/",
+      "title": "Omnizon - Online Shopping for Electronics, Apparel, and More",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "real_omnizon",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 1.191,
+      "state_s": 0.141,
+      "chars": 6206,
+      "elements": 109,
+      "url": "https://real-omnizon.vercel.app/",
+      "title": "Omnizon - Online Shopping for Electronics, Apparel, and More",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.522,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.001,
+            "detail": "new document: loaderId D00564B2 -> BC309736"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId BC309736"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.105,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.104,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.312,
+            "detail": "DOM quiet for 309ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "real_omnizon",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.998,
+      "state_s": 0.064,
+      "chars": 1639,
+      "elements": 17,
+      "url": "https://real-udriver.vercel.app/",
+      "title": "real-udriver.vercel.app",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "waiting": {
+        "ready": true,
+        "navigated": true,
+        "hydrated": true,
+        "elapsed": 0.532,
+        "stages": [
+          {
+            "name": "navigation_start",
+            "ok": true,
+            "elapsed": 0.003,
+            "detail": "new document: loaderId BC309736 -> A5FC48AC"
+          },
+          {
+            "name": "lifecycle_load",
+            "ok": true,
+            "elapsed": 0.0,
+            "detail": "load for loaderId A5FC48AC"
+          },
+          {
+            "name": "hydration.loading_indicators",
+            "ok": true,
+            "elapsed": 0.111,
+            "detail": "no visible loading indicators"
+          },
+          {
+            "name": "hydration.network_quiet",
+            "ok": true,
+            "elapsed": 0.109,
+            "detail": "network quiet, readyState=complete"
+          },
+          {
+            "name": "hydration.mutation_quiet",
+            "ok": true,
+            "elapsed": 0.31,
+            "detail": "DOM quiet for 307ms after 0 counted mutation(s)"
+          }
+        ]
+      },
+      "server": "ours",
+      "site": "real_udriver",
+      "repeat": 2,
+      "cold": false
+    },
+    {
+      "nav_s": 0.441,
+      "state_s": 0.403,
+      "chars": 2040,
+      "elements": 17,
+      "url": "https://real-udriver.vercel.app/",
+      "title": "real-udriver.vercel.app",
+      "outcome": "ok",
+      "nav_error": null,
+      "state_error": null,
+      "server": "stock",
+      "site": "real_udriver",
+      "repeat": 2,
+      "cold": false
+    }
+  ],
+  "stale": {
+    "wikipedia": {
+      "stock": {
+        "token": "BENCHPROBECC066A",
+        "recreated": {
+          "probe_index": 14,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 14",
+          "click_s": 0.579,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 4209,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 4209",
+          "click_s": 0.592,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBEB9AF62",
+        "recreated": {
+          "probe_index": 4199,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBEB9AF62\\\" id=__bench_probe aria-label=BENCHPROBEB9AF62\",\"requested_index\":4199,\"resolved_index\":4201,\"resolution\":{\"index\":4199,\"resolved_index\":4201,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://en.wikipedia.org/wiki/Main_Page\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.107,\"",
+          "click_s": 2.012,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 4209,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [4209]: Element handle [4209] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=4209), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBEB9AF62' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.265,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "allrecipes": {
+      "stock": {
+        "token": "BENCHPROBE073BE2",
+        "recreated": {
+          "probe_index": 20,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 20",
+          "click_s": 0.563,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 32,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 32",
+          "click_s": 0.561,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE233EE7",
+        "recreated": {
+          "probe_index": 27,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE233EE7\\\" id=__bench_probe aria-label=BENCHPROBE233EE7\",\"requested_index\":27,\"resolved_index\":29,\"resolution\":{\"index\":27,\"resolved_index\":29,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.allrecipes.com/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.103,\"detail\":\"no visible ",
+          "click_s": 1.7,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 37,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [37]: Element handle [37] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=37), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE233EE7' role=button). The element is gone from the page. Capture a new snapshot (browse",
+          "click_s": 0.02,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "amazon": {
+      "stock": {
+        "token": "BENCHPROBE4D29C9",
+        "recreated": {
+          "probe_index": 106536,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 106536",
+          "click_s": 0.56,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 110503,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 110503",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE6D31BA",
+        "recreated": {
+          "probe_index": 4247,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE6D31BA\\\" id=__bench_probe aria-label=BENCHPROBE6D31BA\",\"requested_index\":4247,\"resolved_index\":4252,\"resolution\":{\"index\":4247,\"resolved_index\":4252,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.amazon.com/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.108,\"detail\":\"no visi",
+          "click_s": 1.935,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 4841,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [4841]: Element handle [4841] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=4841), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE6D31BA' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.327,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "apple": {
+      "stock": {
+        "token": "BENCHPROBE4C55DB",
+        "recreated": {
+          "probe_index": 106,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 106",
+          "click_s": 0.56,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 4227,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 4227",
+          "click_s": 0.56,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBEDC1E10",
+        "recreated": {
+          "probe_index": 4498,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBEDC1E10\\\" id=__bench_probe aria-label=BENCHPROBEDC1E10\",\"requested_index\":4498,\"resolved_index\":4539,\"resolution\":{\"index\":4498,\"resolved_index\":4539,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.apple.com/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.105,\"detail\":\"no visib",
+          "click_s": 1.895,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 4548,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [4548]: Element handle [4548] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=4548), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBEDC1E10' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.154,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "arxiv": {
+      "stock": {
+        "token": "BENCHPROBEAC079E",
+        "recreated": {
+          "probe_index": 10,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 10",
+          "click_s": 0.564,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 1258,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 1258",
+          "click_s": 0.565,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE7E6A19",
+        "recreated": {
+          "probe_index": 1253,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE7E6A19\\\" id=__bench_probe aria-label=BENCHPROBE7E6A19\",\"requested_index\":1253,\"resolved_index\":1255,\"resolution\":{\"index\":1253,\"resolved_index\":1255,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://arxiv.org/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.103,\"detail\":\"no visible l",
+          "click_s": 1.802,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 1263,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [1263]: Element handle [1263] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=1263), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE7E6A19' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.095,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "github": {
+      "stock": {
+        "token": "BENCHPROBE755FAE",
+        "recreated": {
+          "probe_index": 63,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 63",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 2978,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 2978",
+          "click_s": 0.558,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE6A315A",
+        "recreated": {
+          "probe_index": 2845,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE6A315A\\\" id=__bench_probe aria-label=BENCHPROBE6A315A\",\"requested_index\":2845,\"resolved_index\":2847,\"resolution\":{\"index\":2845,\"resolved_index\":2847,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://github.com/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.112,\"detail\":\"no visible ",
+          "click_s": 1.961,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 2855,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [2855]: Element handle [2855] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=2855), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE6A315A' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.176,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "espn": {
+      "stock": {
+        "token": "BENCHPROBE9E8532",
+        "recreated": {
+          "probe_index": 4173,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 4173",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 4381,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 4381",
+          "click_s": 0.558,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBEA7DCE0",
+        "recreated": {
+          "probe_index": 4341,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBEA7DCE0\\\" id=__bench_probe aria-label=BENCHPROBEA7DCE0\",\"requested_index\":4341,\"resolved_index\":4343,\"resolution\":{\"index\":4341,\"resolved_index\":4343,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.espn.co.uk/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.105,\"detail\":\"no visi",
+          "click_s": 1.815,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 4351,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [4351]: Element handle [4351] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=4351), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBEA7DCE0' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.286,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "coursera": {
+      "stock": {
+        "token": "BENCHPROBED53D16",
+        "recreated": {
+          "probe_index": 2217,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 2217",
+          "click_s": 0.715,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 3465,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 3465",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBEFF1B01",
+        "recreated": {
+          "probe_index": 3390,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBEFF1B01\\\" id=__bench_probe aria-label=BENCHPROBEFF1B01\",\"requested_index\":3390,\"resolved_index\":3467,\"resolution\":{\"index\":3390,\"resolved_index\":3467,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.coursera.org/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.106,\"detail\":\"no vi",
+          "click_s": 2.146,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 3475,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [3475]: Element handle [3475] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=3475), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBEFF1B01' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.393,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "cambridge_dict": {
+      "stock": {
+        "token": "BENCHPROBE7FC04B",
+        "recreated": {
+          "probe_index": 3668,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 3668",
+          "click_s": 0.56,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 4014,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 4014",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBEAE734C",
+        "recreated": {
+          "probe_index": 3946,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBEAE734C\\\" id=__bench_probe aria-label=BENCHPROBEAE734C\",\"requested_index\":3946,\"resolved_index\":3948,\"resolution\":{\"index\":3946,\"resolved_index\":3948,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://dictionary.cambridge.org/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.105,\"detail",
+          "click_s": 1.789,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 3956,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [3956]: Element handle [3956] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=3956), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBEAE734C' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.096,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "bbc_news": {
+      "stock": {
+        "token": "BENCHPROBEAD44EF",
+        "recreated": {
+          "probe_index": 19,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 19",
+          "click_s": 0.567,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 1873,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 1873",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE176C53",
+        "recreated": {
+          "probe_index": 1754,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE176C53\\\" id=__bench_probe aria-label=BENCHPROBE176C53\",\"requested_index\":1754,\"resolved_index\":1756,\"resolution\":{\"index\":1754,\"resolved_index\":1756,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.bbc.com/news\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.107,\"detail\":\"no vis",
+          "click_s": 1.996,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 1764,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [1764]: Element handle [1764] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=1764), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE176C53' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.135,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "huggingface": {
+      "stock": {
+        "token": "BENCHPROBE9A3915",
+        "recreated": {
+          "probe_index": 17,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 17",
+          "click_s": 0.56,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 3011,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 3011",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE197B33",
+        "recreated": {
+          "probe_index": 3009,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE197B33\\\" id=__bench_probe aria-label=BENCHPROBE197B33\",\"requested_index\":3009,\"resolved_index\":3012,\"resolution\":{\"index\":3009,\"resolved_index\":3012,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://huggingface.co/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.106,\"detail\":\"no visi",
+          "click_s": 1.792,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 3020,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [3020]: Element handle [3020] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=3020), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE197B33' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.095,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "wolframalpha": {
+      "stock": {
+        "token": "BENCHPROBE59C54A",
+        "recreated": {
+          "probe_index": 83,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 83",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 732,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 732",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBECC0762",
+        "recreated": {
+          "probe_index": 721,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBECC0762\\\" id=__bench_probe aria-label=BENCHPROBECC0762\",\"requested_index\":721,\"resolved_index\":723,\"resolution\":{\"index\":721,\"resolved_index\":723,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.wolframalpha.com/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.104,\"detail\":\"no vi",
+          "click_s": 1.948,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 763,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [763]: Element handle [763] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=763), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBECC0762' role=button). The element is gone from the page. Capture a new snapshot (bro",
+          "click_s": 0.092,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "google_maps": {
+      "stock": {
+        "token": "BENCHPROBE7D49D1",
+        "recreated": {
+          "probe_index": 13,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 13",
+          "click_s": 0.56,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 332,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 332",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE4A3E88",
+        "recreated": {
+          "probe_index": 762,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE4A3E88\\\" id=__bench_probe aria-label=BENCHPROBE4A3E88\",\"requested_index\":762,\"resolved_index\":768,\"resolution\":{\"index\":762,\"resolved_index\":768,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.google.com/maps/@55.5817222,37.3852376,7z?entry=ttu&g_ep=EgoyMDI2MDgzMS4wIKXMDSoASAFQAw%3D%3D\",\"waiting\":{\"ready\":true,\"sta",
+          "click_s": 1.8,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": true,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 776,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [776]: Element handle [776] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=776), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE4A3E88' role=button). The element is gone from the page. Capture a new snapshot (bro",
+          "click_s": 0.064,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "google_flights": {
+      "stock": {
+        "token": "BENCHPROBE60C311",
+        "recreated": {
+          "probe_index": 791,
+          "mutation": "recreated via replaceWith(cloneNode) [TypeError]",
+          "is_error": false,
+          "reply": "Clicked element 791",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 3098,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 3098",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE05A672",
+        "recreated": {
+          "probe_index": 3124,
+          "mutation": "recreated via replaceWith(cloneNode) [TypeError]",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE05A672\\\" id=__bench_probe aria-label=BENCHPROBE05A672\",\"requested_index\":3124,\"resolved_index\":3126,\"resolution\":{\"index\":3124,\"resolved_index\":3126,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://www.google.com/travel/flights\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.105,\"de",
+          "click_s": 1.88,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 3136,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [3136]: Element handle [3136] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=3136), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE05A672' role=button). The element is gone from the page. Capture a new snapshot (",
+          "click_s": 0.321,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "real_omnizon": {
+      "stock": {
+        "token": "BENCHPROBE4DC5A0",
+        "recreated": {
+          "probe_index": 644,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 644",
+          "click_s": 0.561,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 768,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 768",
+          "click_s": 0.559,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBEC81130",
+        "recreated": {
+          "probe_index": 763,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBEC81130\\\" id=__bench_probe aria-label=BENCHPROBEC81130\",\"requested_index\":763,\"resolved_index\":765,\"resolution\":{\"index\":763,\"resolved_index\":765,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://real-omnizon.vercel.app/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.104,\"detail\":\"no",
+          "click_s": 1.732,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 773,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [773]: Element handle [773] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=773), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBEC81130' role=button). The element is gone from the page. Capture a new snapshot (bro",
+          "click_s": 0.05,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    },
+    "real_udriver": {
+      "stock": {
+        "token": "BENCHPROBE51A021",
+        "recreated": {
+          "probe_index": 16,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "Clicked element 16",
+          "click_s": 0.561,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        },
+        "removed": {
+          "probe_index": 157,
+          "mutation": "removed",
+          "is_error": false,
+          "reply": "Clicked element 157",
+          "click_s": 0.558,
+          "stale_flag": false,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 1
+          },
+          "url_changed": false,
+          "verdict": "clicked-detached"
+        }
+      },
+      "ours": {
+        "token": "BENCHPROBE8B8804",
+        "recreated": {
+          "probe_index": 152,
+          "mutation": "recreated via outerHTML",
+          "is_error": false,
+          "reply": "{\"action\":\"Clicked button \\\"BENCHPROBE8B8804\\\" id=__bench_probe aria-label=BENCHPROBE8B8804\",\"requested_index\":152,\"resolved_index\":154,\"resolution\":{\"index\":152,\"resolved_index\":154,\"level\":\"xpath\",\"matched_by\":\"xpath=html/body/button\",\"reidentified\":true},\"url\":\"https://real-udriver.vercel.app/\",\"waiting\":{\"ready\":true,\"stages\":[{\"name\":\"loading_indicators\",\"ok\":true,\"elapsed\":0.102,\"detail\":\"no",
+          "click_s": 1.7,
+          "stale_flag": false,
+          "counts": {
+            "probe": 1,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "reidentified"
+        },
+        "removed": {
+          "probe_index": 162,
+          "mutation": "removed",
+          "is_error": true,
+          "reply": "STALE ELEMENT HANDLE [162]: Element handle [162] not found in the current page snapshot (the node behind this index was destroyed or detached from the document). Re-identification failed on every level: backend_node_id (backendNodeId=162), xpath (xpath=html/body/button), accessible_name (accessible name='BENCHPROBE8B8804' role=button). The element is gone from the page. Capture a new snapshot (bro",
+          "click_s": 0.023,
+          "stale_flag": true,
+          "counts": {
+            "probe": 0,
+            "shield": 0,
+            "sink": 0,
+            "other": 0,
+            "probeDirect": 0
+          },
+          "url_changed": false,
+          "verdict": "refused"
+        }
+      }
+    }
+  },
+  "errors": [],
+  "chrome": {
+    "Browser": "Chrome/152.0.7977.65",
+    "Protocol-Version": "1.3",
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) HeadlessChrome/152.0.0.0 Safari/537.36",
+    "V8-Version": "15.2.124.18",
+    "WebKit-Version": "537.36 (@fc4d67f1788019a27e32511137ceccbd2fafdaaa)",
+    "webSocketDebuggerUrl": "ws://127.0.0.1:9222/devtools/browser/c5b75f00-7c14-4579-a760-9372f65290bc"
+  },
+  "foreign_tabs_lost": [],
+  "foreign_tabs_changed": [],
+  "finished": "2026-09-03 13:01:06",
+  "composition": {
+    "wikipedia": {
+      "stock": {
+        "total": 12425,
+        "elements_json": 10671,
+        "metadata": 1754,
+        "href_inline": 3604,
+        "text_inline": 835,
+        "json_skeleton": 6232,
+        "n": 85,
+        "per_element": 146.2,
+        "fixed_per_element": 73.3
+      },
+      "ours": {
+        "total": 11858,
+        "tree_raw": 11388,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 468,
+        "indent_ws": 106,
+        "href_inline": 3914,
+        "n": 89,
+        "per_element": 133.2,
+        "fixed_per_element": 0.0
+      }
+    },
+    "allrecipes": {
+      "stock": {
+        "total": 1215,
+        "elements_json": 470,
+        "metadata": 745,
+        "href_inline": 106,
+        "text_inline": 72,
+        "json_skeleton": 292,
+        "n": 4,
+        "per_element": 303.8,
+        "fixed_per_element": 73.0
+      },
+      "ours": {
+        "total": 912,
+        "tree_raw": 514,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 396,
+        "indent_ws": 4,
+        "href_inline": 126,
+        "n": 4,
+        "per_element": 228.0,
+        "fixed_per_element": 0.0
+      }
+    },
+    "amazon": {
+      "stock": {
+        "total": 19813,
+        "elements_json": 17949,
+        "metadata": 1864,
+        "href_inline": 9535,
+        "text_inline": 667,
+        "json_skeleton": 7747,
+        "n": 113,
+        "per_element": 175.3,
+        "fixed_per_element": 68.6
+      },
+      "ours": {
+        "total": 17660,
+        "tree_raw": 17257,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 401,
+        "indent_ws": 290,
+        "href_inline": 9501,
+        "n": 111,
+        "per_element": 159.1,
+        "fixed_per_element": 0.0
+      }
+    },
+    "apple": {
+      "stock": {
+        "total": 2356,
+        "elements_json": 1507,
+        "metadata": 849,
+        "href_inline": 211,
+        "text_inline": 31,
+        "json_skeleton": 1265,
+        "n": 19,
+        "per_element": 124.0,
+        "fixed_per_element": 66.6
+      },
+      "ours": {
+        "total": 1892,
+        "tree_raw": 1495,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 395,
+        "indent_ws": 16,
+        "href_inline": 256,
+        "n": 18,
+        "per_element": 105.1,
+        "fixed_per_element": 0.0
+      }
+    },
+    "arxiv": {
+      "stock": {
+        "total": 27498,
+        "elements_json": 24273,
+        "metadata": 3225,
+        "href_inline": 4618,
+        "text_inline": 3664,
+        "json_skeleton": 15991,
+        "n": 217,
+        "per_element": 126.7,
+        "fixed_per_element": 73.7
+      },
+      "ours": {
+        "total": 16808,
+        "tree_raw": 16422,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 384,
+        "indent_ws": 227,
+        "href_inline": 5678,
+        "n": 217,
+        "per_element": 77.5,
+        "fixed_per_element": 0.0
+      }
+    },
+    "github": {
+      "stock": {
+        "total": 2326,
+        "elements_json": 1370,
+        "metadata": 956,
+        "href_inline": 52,
+        "text_inline": 48,
+        "json_skeleton": 1270,
+        "n": 19,
+        "per_element": 122.4,
+        "fixed_per_element": 66.8
+      },
+      "ours": {
+        "total": 2457,
+        "tree_raw": 2016,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 439,
+        "indent_ws": 49,
+        "href_inline": 77,
+        "n": 19,
+        "per_element": 129.3,
+        "fixed_per_element": 0.0
+      }
+    },
+    "espn": {
+      "stock": {
+        "total": 6269,
+        "elements_json": 5073,
+        "metadata": 1196,
+        "href_inline": 1632,
+        "text_inline": 977,
+        "json_skeleton": 2464,
+        "n": 35,
+        "per_element": 179.1,
+        "fixed_per_element": 70.4
+      },
+      "ours": {
+        "total": 6052,
+        "tree_raw": 5600,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 450,
+        "indent_ws": 97,
+        "href_inline": 1640,
+        "n": 31,
+        "per_element": 195.2,
+        "fixed_per_element": 0.0
+      }
+    },
+    "coursera": {
+      "stock": {
+        "total": 4175,
+        "elements_json": 3017,
+        "metadata": 1158,
+        "href_inline": 537,
+        "text_inline": 165,
+        "json_skeleton": 2315,
+        "n": 36,
+        "per_element": 116.0,
+        "fixed_per_element": 64.3
+      },
+      "ours": {
+        "total": 12801,
+        "tree_raw": 12082,
+        "json_escape": 0,
+        "href_map": 262,
+        "metadata": 457,
+        "indent_ws": 762,
+        "href_inline": 758,
+        "n": 166,
+        "per_element": 77.1,
+        "fixed_per_element": 0.0
+      }
+    },
+    "cambridge_dict": {
+      "stock": {
+        "total": 3713,
+        "elements_json": 2586,
+        "metadata": 1127,
+        "href_inline": 379,
+        "text_inline": 299,
+        "json_skeleton": 1908,
+        "n": 28,
+        "per_element": 132.6,
+        "fixed_per_element": 68.1
+      },
+      "ours": {
+        "total": 4117,
+        "tree_raw": 3629,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 486,
+        "indent_ws": 150,
+        "href_inline": 444,
+        "n": 28,
+        "per_element": 147.0,
+        "fixed_per_element": 0.0
+      }
+    },
+    "bbc_news": {
+      "stock": {
+        "total": 3523,
+        "elements_json": 2345,
+        "metadata": 1178,
+        "href_inline": 467,
+        "text_inline": 54,
+        "json_skeleton": 1824,
+        "n": 27,
+        "per_element": 130.5,
+        "fixed_per_element": 67.6
+      },
+      "ours": {
+        "total": 6933,
+        "tree_raw": 6446,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 485,
+        "indent_ws": 116,
+        "href_inline": 676,
+        "n": 34,
+        "per_element": 203.9,
+        "fixed_per_element": 0.0
+      }
+    },
+    "huggingface": {
+      "stock": {
+        "total": 2474,
+        "elements_json": 1529,
+        "metadata": 945,
+        "href_inline": 131,
+        "text_inline": 73,
+        "json_skeleton": 1325,
+        "n": 19,
+        "per_element": 130.2,
+        "fixed_per_element": 69.7
+      },
+      "ours": {
+        "total": 1742,
+        "tree_raw": 1337,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 403,
+        "indent_ws": 28,
+        "href_inline": 171,
+        "n": 19,
+        "per_element": 91.7,
+        "fixed_per_element": 0.0
+      }
+    },
+    "wolframalpha": {
+      "stock": {
+        "total": 10511,
+        "elements_json": 8824,
+        "metadata": 1687,
+        "href_inline": 2029,
+        "text_inline": 874,
+        "json_skeleton": 5921,
+        "n": 84,
+        "per_element": 125.1,
+        "fixed_per_element": 70.5
+      },
+      "ours": {
+        "total": 6216,
+        "tree_raw": 5766,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 448,
+        "indent_ws": 246,
+        "href_inline": 2373,
+        "n": 85,
+        "per_element": 73.1,
+        "fixed_per_element": 0.0
+      }
+    },
+    "google_maps": {
+      "stock": {
+        "total": 1277,
+        "elements_json": 506,
+        "metadata": 771,
+        "href_inline": 0,
+        "text_inline": 3,
+        "json_skeleton": 503,
+        "n": 8,
+        "per_element": 159.6,
+        "fixed_per_element": 62.9
+      },
+      "ours": {
+        "total": 1044,
+        "tree_raw": 649,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 393,
+        "indent_ws": 5,
+        "href_inline": 0,
+        "n": 8,
+        "per_element": 130.5,
+        "fixed_per_element": 0.0
+      }
+    },
+    "google_flights": {
+      "stock": {
+        "total": 6963,
+        "elements_json": 5453,
+        "metadata": 1510,
+        "href_inline": 151,
+        "text_inline": 768,
+        "json_skeleton": 4534,
+        "n": 71,
+        "per_element": 98.1,
+        "fixed_per_element": 63.9
+      },
+      "ours": {
+        "total": 5703,
+        "tree_raw": 5206,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 495,
+        "indent_ws": 500,
+        "href_inline": 55,
+        "n": 71,
+        "per_element": 80.3,
+        "fixed_per_element": 0.0
+      }
+    },
+    "real_omnizon": {
+      "stock": {
+        "total": 8812,
+        "elements_json": 6889,
+        "metadata": 1923,
+        "href_inline": 1,
+        "text_inline": 454,
+        "json_skeleton": 6434,
+        "n": 109,
+        "per_element": 80.8,
+        "fixed_per_element": 59.0
+      },
+      "ours": {
+        "total": 6181,
+        "tree_raw": 5702,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 477,
+        "indent_ws": 215,
+        "href_inline": 6,
+        "n": 109,
+        "per_element": 56.7,
+        "fixed_per_element": 0.0
+      }
+    },
+    "real_udriver": {
+      "stock": {
+        "total": 2077,
+        "elements_json": 1154,
+        "metadata": 923,
+        "href_inline": 10,
+        "text_inline": 39,
+        "json_skeleton": 1105,
+        "n": 17,
+        "per_element": 122.2,
+        "fixed_per_element": 65.0
+      },
+      "ours": {
+        "total": 1654,
+        "tree_raw": 1214,
+        "json_escape": 0,
+        "href_map": 0,
+        "metadata": 438,
+        "indent_ws": 60,
+        "href_inline": 15,
+        "n": 17,
+        "per_element": 97.3,
+        "fixed_per_element": 0.0
+      }
+    }
+  }
+}

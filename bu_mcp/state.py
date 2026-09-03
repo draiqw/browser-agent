@@ -474,6 +474,7 @@ async def serialize_state(session: 'BrowserSession', *, max_chars: int = 40000) 
 	``elements`` for addressability.
 	"""
 	state = await session.get_browser_state_summary(include_screenshot=False)
+	_focus = getattr(session, 'agent_focus_target_id', None)
 
 	selector_map = dict(state.dom_state.selector_map or {})
 	raw_tree = state.dom_state.llm_representation(include_attributes=DEFAULT_INCLUDE_ATTRIBUTES)
@@ -499,7 +500,14 @@ async def serialize_state(session: 'BrowserSession', *, max_chars: int = 40000) 
 				'target_id': getattr(tab, 'target_id', None),
 				'url': tab.url,
 				'title': tab.title,
-				'current': tab.url == state.url and tab.title == state.title,
+				# Авторитетный источник — фокус сессии. Сравнение url+title даёт
+				# несколько «текущих» вкладок, когда две открыты на одной странице,
+				# и клиент, закрывающий «текущую», попадает не в ту.
+				'current': (
+					getattr(tab, 'target_id', None) == _focus
+					if _focus
+					else tab.url == state.url and tab.title == state.title
+				),
 			}
 			for tab in (state.tabs or [])
 		],

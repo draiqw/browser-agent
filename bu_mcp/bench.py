@@ -637,6 +637,11 @@ async def measure_once(bound: Bound, url: str) -> dict[str, Any]:
 		if isinstance(waiting, dict):
 			rec['waiting'] = {
 				'ready': waiting.get('ready'),
+				# whether the ladder actually saw a navigation, and whether the
+				# hydration stage settled -- without these two the stage table
+				# below can only be reconstructed from free-text stage details.
+				'navigated': waiting.get('navigated'),
+				'hydrated': waiting.get('hydrated'),
 				'elapsed': waiting.get('elapsed'),
 				'stages': [
 					{'name': s.get('name') or s.get('stage'), 'ok': s.get('ok'), 'elapsed': s.get('elapsed'), 'detail': s.get('detail')}
