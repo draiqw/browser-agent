@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import re
+import statistics
 import sys
 from pathlib import Path
 
@@ -102,8 +103,19 @@ async def main() -> int:
 			else:
 				bad('more than 5 tools exposed', f'only {len(names)}')
 
-			for expected in ('browser_state', 'browser_navigate', 'browser_click', 'browser_type', 'browser_screenshot',
-							 'browser_hover', 'find_elements', 'search_page', 'scroll', 'evaluate', 'dropdown_options'):
+			for expected in (
+				'browser_state',
+				'browser_navigate',
+				'browser_click',
+				'browser_type',
+				'browser_screenshot',
+				'browser_hover',
+				'find_elements',
+				'search_page',
+				'scroll',
+				'evaluate',
+				'dropdown_options',
+			):
 				if expected in names:
 					ok(f'tool present: {expected}')
 				else:
@@ -146,8 +158,10 @@ async def main() -> int:
 				bad('browser_state', text_of(res))
 				return report()
 			state = state_of(res)
-			print(f'  title={state.get("title")!r} interactive={state.get("elements")} '
-				  f'tree_len={len(state.get("tree", ""))} truncated={state.get("truncated")}')
+			print(
+				f'  title={state.get("title")!r} interactive={state.get("elements")} '
+				f'tree_len={len(state.get("tree", ""))} truncated={state.get("truncated")}'
+			)
 			for key in ('url', 'title', 'tabs', 'viewport', 'scroll', 'tree', 'truncated'):
 				if key in state:
 					ok(f'browser_state has `{key}`')
@@ -240,8 +254,10 @@ async def main() -> int:
 			print('\n[7b] browser_type into a probe input')
 			res = await session.call_tool(
 				'evaluate',
-				{'code': "(function(){const i=document.createElement('input');i.id='buMcpProbe';"
-						 "i.setAttribute('aria-label','bu mcp probe');document.body.prepend(i);return 'injected';})()"},
+				{
+					'code': "(function(){const i=document.createElement('input');i.id='buMcpProbe';"
+					"i.setAttribute('aria-label','bu mcp probe');document.body.prepend(i);return 'injected';})()"
+				},
 			)
 			print(f'  evaluate -> {text_of(res)[:120]}')
 			res = await session.call_tool('browser_state', {})
@@ -293,6 +309,9 @@ async def main() -> int:
 
 			# --- 11. ховер и дельта ---------------------------------------- #
 			await hover_and_delta_checks(session)
+
+			# --- 12. журнал и макросы -------------------------------------- #
+			await journal_macro_checks(session)
 
 	await allowlist_check()
 	return report()
@@ -358,9 +377,13 @@ def contract_checks() -> None:
 
 	# Гейт по имени действия: та же строка в выдаче search_page — это просто
 	# текст со страницы, а не провал действия.
-	if getattr(BuMcpServer, '_classify_noop', None) and BuMcpServer._classify_noop(
-		'search_page', 'Element index 42 not available - page may have changed. Try refreshing browser state.'
-	) is None:
+	if (
+		getattr(BuMcpServer, '_classify_noop', None)
+		and BuMcpServer._classify_noop(
+			'search_page', 'Element index 42 not available - page may have changed. Try refreshing browser state.'
+		)
+		is None
+	):
 		ok('no-op check is gated by action name (search_page output is not flagged)')
 	else:
 		bad('no-op check is gated by action name')
@@ -436,6 +459,272 @@ def contract_checks() -> None:
 		bad('real scroll reports the measured delta', json.dumps(out)[:200])
 
 	delta_contract_checks(BuMcpServer, ToolError)
+	headless_contract_checks(BuMcpServer)
+	journal_contract_checks(BuMcpServer, ToolError)
+
+
+def headless_contract_checks(BuMcpServer) -> None:
+	"""Профиль браузера: явный headless и НИКАКОГО override вьюпорта при подключении.
+
+	Живой браузер не нужен: всё решается в валидаторе ``BrowserProfile``.
+	"""
+	print('\n[10d] contract: browser profile (headless / viewport override)')
+	headless = getattr(BuMcpServer, '_headless', None)
+	profile = getattr(BuMcpServer, '_profile', None)
+	if headless is None or profile is None:
+		bad(
+			'profile: headless is set explicitly, not inferred from the display', '_headless/_profile are missing from the server'
+		)
+		bad('profile: BU_MCP_HEADLESS overrides it')
+		bad("profile: connecting to someone else's browser never overrides its viewport")
+		bad('profile: the launch path keeps its viewport')
+		return
+
+	saved = os.environ.get('BU_MCP_HEADLESS')
+	try:
+		os.environ.pop('BU_MCP_HEADLESS', None)
+		default_headless = headless()
+		if default_headless is True:
+			ok('profile: headless is set explicitly, not inferred from the display')
+		else:
+			bad('profile: headless is set explicitly, not inferred from the display', str(default_headless))
+
+		flips = {v: None for v in ('0', 'false', 'no', 'off', 'FALSE', '1', 'true')}
+		for value in flips:
+			os.environ['BU_MCP_HEADLESS'] = value
+			flips[value] = headless()
+		if all(v is False for k, v in flips.items() if k.lower() in ('0', 'false', 'no', 'off')) and all(
+			v is True for k, v in flips.items() if k.lower() in ('1', 'true')
+		):
+			ok('profile: BU_MCP_HEADLESS overrides it', 'a window is one env var away when you need to log in by hand')
+		else:
+			bad('profile: BU_MCP_HEADLESS overrides it', str(flips))
+
+		os.environ.pop('BU_MCP_HEADLESS', None)
+		# Подключение к чужому браузеру: headless=True тянет viewport=screen и
+		# no_viewport=False, а с ними Emulation.setDeviceMetricsOverride на КАЖДУЮ
+		# вкладку, на которую переводится фокус — включая чужую, на которую
+		# browser-use переключается сам. Этого быть не должно.
+		connected = profile('http://127.0.0.1:9222')
+		if connected.headless is True and connected.viewport is None and connected.no_viewport is True:
+			ok("profile: connecting to someone else's browser never overrides its viewport")
+		else:
+			bad(
+				"profile: connecting to someone else's browser never overrides its viewport",
+				f'headless={connected.headless} viewport={connected.viewport} no_viewport={connected.no_viewport}',
+			)
+
+		launched = profile('')
+		if launched.headless is True and launched.viewport is not None and launched.no_viewport is False:
+			ok('profile: the launch path keeps its viewport')
+		else:
+			bad(
+				'profile: the launch path keeps its viewport',
+				f'headless={launched.headless} viewport={launched.viewport} no_viewport={launched.no_viewport}',
+			)
+	finally:
+		if saved is None:
+			os.environ.pop('BU_MCP_HEADLESS', None)
+		else:
+			os.environ['BU_MCP_HEADLESS'] = saved
+
+
+def journal_contract_checks(BuMcpServer, ToolError) -> None:
+	"""Чистые проверки журнала: конверт записи, вердикт, отказоустойчивость, имя макроса.
+
+	Живой браузер тут не нужен нарочно: «journal.record упал» и «модуля журнала
+	вообще нет» в браузере не поставить, а это ровно те два случая, ради которых
+	запись обязана быть не участником, а наблюдателем.
+	"""
+	print('\n[10c] contract: journal envelope / failure isolation / macro names (pure)')
+	import types as _types
+
+	open_ = getattr(BuMcpServer, '_journal_open', None)
+	write = getattr(BuMcpServer, '_journal_write', None)
+	outcome = getattr(BuMcpServer, '_journal_outcome', None)
+	macro_name = getattr(BuMcpServer, '_macro_name', None)
+	macro_urls = getattr(BuMcpServer, '_macro_urls', None)
+	summary = getattr(BuMcpServer, '_journal_summary', None)
+	missing_helpers = [
+		n
+		for n, f in (
+			('_journal_open', open_),
+			('_journal_write', write),
+			('_journal_outcome', outcome),
+			('_macro_name', macro_name),
+			('_macro_urls', macro_urls),
+			('_journal_summary', summary),
+		)
+		if f is None
+	]
+	if missing_helpers:
+		print(f'  missing helpers: {missing_helpers}')
+	# Каждая проверка ниже падает сама за себя: общий ранний выход прятал бы то,
+	# что именно не сделано, и превращал бы одиннадцать тестов в один.
+	open_ = open_ or (lambda *a, **k: {})
+	outcome = outcome or (lambda *a, **k: None)
+	if write is None:
+
+		def write(_entry):  # noqa: E306 — заглушка обязана падать, иначе тесты изоляции пройдут вхолостую
+			raise AssertionError('_journal_write is missing from the server')
+
+	macro_urls = macro_urls or (lambda *a, **k: [])
+	summary = summary or (lambda *a, **k: {})
+	if macro_name is None:
+
+		def macro_name(_raw):  # noqa: E306
+			return '<no _macro_name>'
+
+	fields = getattr(sys.modules[BuMcpServer.__module__], 'JOURNAL_FIELDS', ())
+	journalled = getattr(sys.modules[BuMcpServer.__module__], 'JOURNALED_TOOLS', frozenset())
+
+	# 1. Конверт записи: все контрактные ключи проставлены сразу.
+	entry = open_('browser_click', {'index': 12})
+	missing = [
+		k for k in ('ts', 'tool', 'params', 'handle', 'url_before', 'url_after', 'delta', 'outcome', 'error') if k not in entry
+	]
+	if not missing and entry['tool'] == 'browser_click' and entry['params'] == {'index': 12}:
+		ok('journal: the entry carries every field from JOURNAL_CONTRACT.md')
+	else:
+		bad('journal: the entry carries every field from JOURNAL_CONTRACT.md', f'missing={missing}')
+	if set(fields) == {'ts', 'tool', 'params', 'handle', 'url_before', 'url_after', 'delta', 'outcome', 'error'}:
+		ok('journal: JOURNAL_FIELDS matches the contract')
+	else:
+		bad('journal: JOURNAL_FIELDS matches the contract', str(sorted(fields)))
+
+	# 2. Журналируются РОВНО действия, меняющие состояние.
+	expected_tools = {
+		'browser_click',
+		'browser_type',
+		'browser_hover',
+		'browser_navigate',
+		'select_dropdown',
+		'send_keys',
+		'scroll',
+	}
+	if set(journalled) == expected_tools:
+		ok('journal: exactly the state-changing tools are journalled')
+	else:
+		bad('journal: exactly the state-changing tools are journalled', str(sorted(journalled)))
+
+	# 3. Вердикт: ошибка -> error, пустая дельта при успехе -> noop, иначе ok.
+	cases = [
+		({'error': 'boom', 'delta': None}, 'error'),
+		({'error': None, 'delta': {'changed': False, 'no_effect': True}}, 'noop'),
+		({'error': None, 'delta': {'changed': True}}, 'ok'),
+		({'error': None, 'delta': None}, 'ok'),
+	]
+	wrong = [(c, outcome(c), want) for c, want in cases if outcome(c) != want]
+	if not wrong:
+		ok('journal: outcome is ok / noop / error, and no_effect counts as noop')
+	else:
+		bad('journal: outcome is ok / noop / error, and no_effect counts as noop', str(wrong)[:200])
+
+	# 4. Сломанный журнал НЕ ломает действие.
+	saved = sys.modules.get('bu_mcp.journal')
+	try:
+		captured: list = []
+		good = _types.ModuleType('bu_mcp.journal')
+		good.record = lambda e: captured.append(e)  # noqa: E731
+		sys.modules['bu_mcp.journal'] = good
+		e = open_('browser_type', {'index': 3, 'text': 'x'})
+		try:
+			write(e)
+		except Exception as exc:  # noqa: BLE001
+			print(f'  _journal_write: {exc}')
+		if len(captured) == 1 and captured[0]['outcome'] == 'ok' and isinstance(captured[0].get('cost_ms'), float):
+			ok('journal: a normal action is handed to journal.record with its own measured cost')
+		else:
+			bad('journal: a normal action is handed to journal.record with its own measured cost', str(captured)[:200])
+
+		broken = _types.ModuleType('bu_mcp.journal')
+
+		def _boom(_entry):
+			raise RuntimeError('journal disk on fire')
+
+		broken.record = _boom
+		sys.modules['bu_mcp.journal'] = broken
+		try:
+			write(open_('browser_click', {'index': 1}))
+		except Exception as exc:  # noqa: BLE001
+			bad('journal: a failing journal.record does not break the action', f'{type(exc).__name__}: {exc}')
+		else:
+			ok('journal: a failing journal.record does not break the action')
+
+		sys.modules['bu_mcp.journal'] = None  # importlib -> ImportError
+		try:
+			write(open_('browser_click', {'index': 1}))
+		except Exception as exc:  # noqa: BLE001
+			bad('journal: a missing journal module does not break the action', f'{type(exc).__name__}: {exc}')
+		else:
+			ok('journal: a missing journal module does not break the action')
+	finally:
+		if saved is None:
+			sys.modules.pop('bu_mcp.journal', None)
+		else:
+			sys.modules['bu_mcp.journal'] = saved
+
+	# 5. Имя макроса едет в путь файла -> белый список, отказ вместо санитайзинга.
+	refused = []
+	for evil in ('../evil', 'a/b', '', '.hidden', 'x' * 65, 'name with space'):
+		try:
+			macro_name(evil)
+		except ToolError:
+			continue
+		refused.append(evil)
+	if not refused:
+		ok('macro: a name that would escape the macro directory is refused')
+	else:
+		bad('macro: a name that would escape the macro directory is refused', str(refused))
+	try:
+		accepted = macro_name('bu_mcp.smoke-1') == 'bu_mcp.smoke-1'
+	except ToolError as exc:
+		accepted = False
+		print(f'  macro_name rejected a valid name: {exc}')
+	if accepted:
+		ok('macro: an ordinary name is accepted as is')
+	else:
+		bad('macro: an ordinary name is accepted as is')
+
+	# 6. Доменный гейт макроса кормится URL из шагов, включая вложенные.
+	urls = macro_urls(
+		{
+			'steps': [
+				{'tool': 'browser_navigate', 'params': {'url': 'https://a.example'}},
+				{'tool': 'browser_click', 'handle': {'url': 'https://b.example'}},
+			]
+		}
+	)
+	if set(urls) == {'https://a.example', 'https://b.example'}:
+		ok('macro: every URL baked into the steps is visible to the domain gate')
+	else:
+		bad('macro: every URL baked into the steps is visible to the domain gate', str(urls))
+
+	# 7. Листинг журнала не тащит наружу полный хендл — иначе он стоил бы как состояние.
+	row = summary(
+		{
+			'ts': 1.0,
+			'tool': 'browser_click',
+			'params': {'index': 5},
+			'outcome': 'ok',
+			'url_after': 'https://example.com/',
+			'cost_ms': 1.0,
+			'handle': {
+				'index': 5,
+				'tag': 'button',
+				'role': 'button',
+				'accessible_name': 'Go',
+				'xpath': 'html/body/button',
+				'attributes': {'id': 'go'},
+				'session_id': 'X',
+			},
+			'delta': {'changed': True, 'status': 'changed', 'cost_ms': 3.0, 'fields': {'digest': 'changed'}},
+		}
+	)
+	if 'xpath' not in (row.get('handle') or {}) and (row.get('handle') or {}).get('accessible_name') == 'Go':
+		ok('journal_list summarises the handle instead of dumping it')
+	else:
+		bad('journal_list summarises the handle instead of dumping it', json.dumps(row)[:200])
 
 
 #: Снимок дельты «до»: минимальный набор полей, которые отдаёт _DELTA_PROBE_JS.
@@ -744,7 +1033,7 @@ HOVER_PAGE_JS = (
 	"st.textContent='#hoverHost{width:220px;height:60px;background:#eee;margin:40px}'"
 	"+'#hoverMenu{display:none;width:150px;height:80px;background:#0a0}'"
 	"+'#hoverHost:hover #hoverMenu{display:block}';"
-	"document.head.appendChild(st);"
+	'document.head.appendChild(st);'
 	"var host=document.createElement('div');host.id='hoverHost';host.setAttribute('role','button');"
 	"host.tabIndex=0;host.textContent='HOVER ME';"
 	"var menu=document.createElement('div');menu.id='hoverMenu';menu.textContent='HOVER ONLY MENU';"
@@ -763,7 +1052,7 @@ HOVER_VISIBLE_JS = (
 HOVER_SYNTHETIC_JS = (
 	"(function(){var h=document.getElementById('hoverHost');"
 	"['mouseover','mouseenter','mousemove','pointerover','pointerenter'].forEach(function(t){"
-	"h.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window,clientX:100,clientY:80}))});"
+	'h.dispatchEvent(new MouseEvent(t,{bubbles:true,cancelable:true,view:window,clientX:100,clientY:80}))});'
 	"return 'dispatched'})()"
 )
 
@@ -883,7 +1172,7 @@ async def hover_and_delta_checks(session) -> None:
 		else:
 			res = await session.call_tool('browser_click', {'index': inert_index})
 			body = text_of(res)
-			delta = (as_json(body).get('delta') or {})
+			delta = as_json(body).get('delta') or {}
 			print(f'  click inert -> delta={json.dumps(delta)[:220]}')
 			if res.isError:
 				bad('a click that changes nothing is NOT an error', body[:200])
@@ -900,7 +1189,7 @@ async def hover_and_delta_checks(session) -> None:
 
 			res = await session.call_tool('browser_click', {'index': live_btn_index})
 			body = text_of(res)
-			delta = (as_json(body).get('delta') or {})
+			delta = as_json(body).get('delta') or {}
 			print(f'  click live -> delta={json.dumps(delta)[:220]}')
 			if delta.get('changed') is True and 'no_effect' not in delta:
 				ok('a click that changes the page is not flagged')
@@ -952,6 +1241,270 @@ async def hover_and_delta_checks(session) -> None:
 			ok('hover run cleaned up its tabs', f'{closed}')
 		else:
 			bad('hover run cleaned up its tabs', f'{closed}/{len(mine)}')
+
+
+# --------------------------------------------------------------------------- #
+# [12] Журнал действий и макросы (JOURNAL_CONTRACT.md)
+# --------------------------------------------------------------------------- #
+
+#: Синтетическая страница под запись: поле + кнопка, которая приписывает #macroDone.
+#: aria-label стоит НАМЕРЕННО: после перезагрузки backendNodeId у обоих элементов
+#: другой, и переидентификация пойдёт по xpath + accessible name — то есть ровно
+#: по тому, что макрос сохранил вместо индекса.
+MACRO_PAGE_JS = (
+	"(function(){document.body.innerHTML='';"
+	"var i=document.createElement('input');i.id='macroInput';i.setAttribute('aria-label','macro input');"
+	"var b=document.createElement('button');b.id='macroBtn';b.setAttribute('aria-label','macro button');"
+	"b.textContent='RUN';b.onclick=function(){if(document.getElementById('macroDone'))return;"
+	"var p=document.createElement('p');p.id='macroDone';p.textContent='done';document.body.appendChild(p)};"
+	"document.body.append(i,b);return 'built'})()"
+)
+
+#: Состояние страницы одной строкой: что в поле и появился ли результат клика.
+MACRO_PROBE_JS = (
+	"(function(){var i=document.getElementById('macroInput');"
+	"return 'value=['+(i?i.value:'')+'] done='+(document.getElementById('macroDone')?'yes':'no')})()"
+)
+
+MACRO_TEXT = 'journalled by bu-mcp'
+MACRO_OTHER_TEXT = 'overridden through vars'
+MACRO_NAME = 'bu_mcp_smoke'
+
+
+async def journal_macro_checks(session) -> None:
+	"""Сквозной сценарий: записать -> собрать макрос -> ПЕРЕЗАГРУЗИТЬ -> прогнать."""
+	print('\n[12] journal + macros: record -> macro_save -> reload -> macro_run')
+	before = {t['tab_id']: (t.get('url') or '') for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])}
+	res = await session.call_tool('browser_navigate', {'url': 'https://example.com', 'new_tab': True})
+	if res.isError:
+		bad('journal run opened its own tab', text_of(res)[:160])
+		return
+	after = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
+	ours = {t['tab_id'] for t in after} - set(before)
+	if not ours:
+		# new_tab=True не всегда создаёт таргет: если единственная вкладка была
+		# пустой (chrome://newtab, about:blank), browser-use навигирует ЕЁ.
+		# Присваиваем её себе только по id и только убедившись, что ДО навигации
+		# в ней ничего не было. Признак «текущая вкладка» сам по себе для уборки
+		# не годится: при отсоединении своей вкладки browser-use переводит фокус
+		# на произвольную соседнюю, и по нему можно закрыть чужое.
+		current = next((t['tab_id'] for t in after if t.get('current')), None)
+		was = before.get(current or '', '')
+		if current and (was.startswith('about:blank') or was.startswith('chrome://new') or was == ''):
+			ours = {current}
+	print(f'  our tabs: {sorted(ours)} (before: {len(before)} tabs)')
+	macro_file = None
+
+	async def ev(code: str) -> str:
+		return text_of(await session.call_tool('evaluate', {'code': code}))
+
+	try:
+		await ev(MACRO_PAGE_JS)
+		type_index = await index_of(session, 'id=macroInput')
+		click_index = await index_of(session, 'id=macroBtn')
+		if type_index is None or click_index is None:
+			bad('journal probe page shows up in browser_state', f'input={type_index} button={click_index}')
+			return
+
+		# -- 1. записываем последовательность ------------------------------- #
+		r_type = await session.call_tool('browser_type', {'index': type_index, 'text': MACRO_TEXT})
+		r_click = await session.call_tool('browser_click', {'index': click_index})
+		if r_type.isError or r_click.isError:
+			bad('journal run recorded a type+click sequence', (text_of(r_type) + text_of(r_click))[:220])
+			return
+		probe = await ev(MACRO_PROBE_JS)
+		if f'value=[{MACRO_TEXT}]' not in probe:
+			# browser-use иногда теряет последний символ при вводе. Это не наш слой;
+			# повторяем ввод (clear=True), а to_macro схлопнет подряд идущие вводы
+			# в одно поле в последний из них — ровно этот случай он и описывает.
+			print(f'  retyping after a short input: {probe.strip()[:80]}')
+			r_type = await session.call_tool('browser_type', {'index': type_index, 'text': MACRO_TEXT})
+			probe = await ev(MACRO_PROBE_JS)
+		print(f'  after recording: {probe.strip()[:120]}')
+		if f'value=[{MACRO_TEXT}]' in probe and 'done=yes' in probe:
+			ok('the recorded sequence actually changed the page')
+		else:
+			bad('the recorded sequence actually changed the page', probe[:200])
+			return
+
+		# -- 2. journal_list ------------------------------------------------ #
+		res = await session.call_tool('journal_list', {'limit': 40, 'full': True})
+		if res.isError:
+			bad('journal_list returns what was recorded', text_of(res)[:300])
+			listing = {}
+		else:
+			ok('journal_list returns what was recorded')
+			listing = as_json(text_of(res))
+		rows = listing.get('entries') or []
+		print(f'  journal: total={listing.get("total")} returned={listing.get("returned")} path={listing.get("path")}')
+		typed = [r for r in rows if r.get('tool') == 'browser_type' and (r.get('params') or {}).get('text') == MACRO_TEXT]
+		clicked = [r for r in rows if r.get('tool') == 'browser_click' and (r.get('params') or {}).get('index') == click_index]
+		if typed and clicked:
+			ok('journal recorded browser_type and browser_click', f'{len(rows)} entries listed')
+		else:
+			bad('journal recorded browser_type and browser_click', json.dumps([r.get('tool') for r in rows])[:200])
+		entry = clicked[-1] if clicked else {}
+		if entry.get('outcome') == 'ok' and entry.get('url_before') and entry.get('url_after'):
+			ok('a journal entry carries outcome and the URL before/after')
+		else:
+			bad('a journal entry carries outcome and the URL before/after', json.dumps(entry)[:240])
+		handle = entry.get('handle') or {}
+		if handle.get('xpath') and handle.get('accessible_name') == 'macro button':
+			ok('a journal entry carries the full describe_handle', f'xpath={handle.get("xpath")}')
+		else:
+			bad('a journal entry carries the full describe_handle', json.dumps(handle)[:240])
+		if (entry.get('delta') or {}).get('changed') is True:
+			ok('a journal entry reuses the delta the action already measured')
+		else:
+			bad('a journal entry reuses the delta the action already measured', json.dumps(entry.get('delta'))[:200])
+
+		# Цена журнала должна быть НИЖЕ цены дельты, к которой он пристёгнут.
+		# Сравниваются медианы по всем записям, а не один замер: обе величины
+		# субмиллисекундные, и одиночная проба на них шумит сильнее, чем разница.
+		paired = [
+			(float(r['cost_ms']), float((r.get('delta') or {}).get('cost_ms')))
+			for r in rows
+			if isinstance(r.get('cost_ms'), (int, float)) and isinstance((r.get('delta') or {}).get('cost_ms'), (int, float))
+		]
+		if paired:
+			j_med = statistics.median(c for c, _ in paired)
+			d_med = statistics.median(d for _, d in paired)
+			print(
+				f'  cost over {len(paired)} entries: journal median {j_med:.2f}ms vs delta median {d_med:.2f}ms '
+				f'(journal max {max(c for c, _ in paired):.2f}ms)'
+			)
+		else:
+			j_med = d_med = None
+		if paired and j_med < d_med:
+			ok('journalling costs less than the delta it rides along with', f'{j_med:.2f}ms < {d_med:.2f}ms')
+		else:
+			bad('journalling costs less than the delta it rides along with', f'journal={j_med} delta={d_med}')
+
+		# -- 3. macro_save -------------------------------------------------- #
+		include = [typed[-1]['i'], clicked[-1]['i']] if typed and clicked else []
+		res = await session.call_tool('macro_save', {'name': MACRO_NAME, 'include': include})
+		if res.isError:
+			bad('macro_save builds a macro out of journal entries', text_of(res)[:300])
+			saved = {}
+		else:
+			ok('macro_save builds a macro out of journal entries')
+			saved = as_json(text_of(res))
+		macro_file = saved.get('file')
+		print(f'  macro: {saved.get("steps")} steps {saved.get("tools")} vars={list((saved.get("vars") or {}))}')
+		if saved.get('steps') == 2 and saved.get('tools') == ['browser_type', 'browser_click']:
+			ok('macro_save keeps both state-changing steps in order')
+		else:
+			bad('macro_save keeps both state-changing steps in order', json.dumps(saved)[:240])
+		macro_vars = saved.get('vars') or {}
+		if macro_vars:
+			ok('macro_save parameterises the typed text', f'vars={sorted(macro_vars)}')
+		else:
+			bad('macro_save parameterises the typed text', 'no variables in the saved macro')
+
+		res = await session.call_tool('macro_list', {'name': MACRO_NAME})
+		shown = as_json(text_of(res))
+		if not res.isError and len((shown.get('macro') or {}).get('steps') or []) == 2:
+			ok('macro_list shows the saved macro')
+		else:
+			bad('macro_list shows the saved macro', text_of(res)[:240])
+
+		# -- 4. ПЕРЕЗАГРУЗКА: индексы становятся недействительными ----------- #
+		res = await session.call_tool('browser_navigate', {'url': 'https://example.com'})
+		if res.isError:
+			bad('journal run reloaded its page', text_of(res)[:200])
+			return
+		ok('journal run reloaded its page')
+		await ev(MACRO_PAGE_JS)
+		probe = await ev(MACRO_PROBE_JS)
+		click_index_2 = await index_of(session, 'id=macroBtn')
+		print(f'  after reload: {probe.strip()[:120]}  button index {click_index} -> {click_index_2}')
+		if 'value=[]' in probe and 'done=no' in probe:
+			ok('the reload wiped the recorded effect')
+		else:
+			bad('the reload wiped the recorded effect', probe[:200])
+		if click_index_2 is not None and click_index_2 != click_index:
+			ok('the reload invalidated the indices the macro was recorded with', f'{click_index} -> {click_index_2}')
+		else:
+			bad('the reload invalidated the indices the macro was recorded with', f'{click_index} -> {click_index_2}')
+
+		# -- 5. macro_run на новых узлах ------------------------------------ #
+		res = await session.call_tool('macro_run', {'name': MACRO_NAME})
+		body = text_of(res)
+		print(f'  macro_run -> isError={res.isError} {body[:260]}')
+		if res.isError:
+			bad('macro_run replays the sequence after a reload', body[:400])
+		else:
+			out = as_json(body)
+			if out.get('ok') is True and len(out.get('steps') or []) == 2:
+				ok('macro_run replays the sequence after a reload', f'{len(out.get("steps") or [])} steps')
+			else:
+				bad('macro_run replays the sequence after a reload', body[:300])
+		if as_json(body).get('strict') is True:
+			ok('macro_run is strict by default')
+		else:
+			bad('macro_run is strict by default', body[:200])
+		probe = await ev(MACRO_PROBE_JS)
+		print(f'  after macro_run: {probe.strip()[:120]}')
+		if f'value=[{MACRO_TEXT}]' in probe and 'done=yes' in probe:
+			ok('the replayed macro reproduced the page state on fresh nodes')
+		else:
+			bad('the replayed macro reproduced the page state on fresh nodes', probe[:200])
+
+		# -- 6. переменные ---------------------------------------------------- #
+		if macro_vars:
+			await ev(MACRO_PAGE_JS)
+			key = sorted(macro_vars)[0]
+			res = await session.call_tool('macro_run', {'name': MACRO_NAME, 'vars': {key: MACRO_OTHER_TEXT}})
+			probe = await ev(MACRO_PROBE_JS)
+			print(f'  macro_run vars={{{key!r}: ...}} -> isError={res.isError} {probe.strip()[:120]}')
+			if not res.isError and f'value=[{MACRO_OTHER_TEXT}]' in probe:
+				ok('macro_run substitutes the text through vars')
+			else:
+				bad('macro_run substitutes the text through vars', (text_of(res) + ' | ' + probe)[:260])
+
+		# -- 7. шаг, который нельзя воспроизвести, ЛОМАЕТ вызов -------------- #
+		await ev(MACRO_PAGE_JS)
+		await ev("(function(){var b=document.getElementById('macroBtn');if(b)b.remove();return 'removed'})()")
+		res = await session.call_tool('macro_run', {'name': MACRO_NAME})
+		body = text_of(res)
+		probe = await ev(MACRO_PROBE_JS)
+		print(f'  macro_run with the target gone -> isError={res.isError} {body[:220]}')
+		# `isError` одного мало: «Unknown tool» — тоже ошибка. Ошибка должна быть
+		# ИМЕННО про провалившийся макрос, и страница должна остаться нетронутой.
+		if res.isError and 'FAILED' in body and 'done=no' in probe:
+			ok('a macro step that cannot be reproduced is a hard error, not a success report')
+		else:
+			bad('a macro step that cannot be reproduced is a hard error, not a success report', f'{body[:240]} | {probe[:80]}')
+
+		# -- 8. отказы на входе ---------------------------------------------- #
+		res = await session.call_tool('macro_run', {'name': 'bu_mcp_no_such_macro'})
+		if res.isError and 'No macro named' in text_of(res):
+			ok('macro_run on an unknown name is a hard error')
+		else:
+			bad('macro_run on an unknown name is a hard error', text_of(res)[:200])
+		res = await session.call_tool('macro_save', {'name': '../evil'})
+		if res.isError and 'Bad macro name' in text_of(res):
+			ok('macro_save refuses a name that would escape the macro directory')
+		else:
+			bad('macro_save refuses a name that would escape the macro directory', text_of(res)[:200])
+	finally:
+		if macro_file:
+			try:
+				Path(macro_file).unlink()
+			except Exception as exc:  # noqa: BLE001
+				print(f'  cleanup: could not remove {macro_file}: {exc}')
+		# Уборка: закрываем ТОЛЬКО свои вкладки, по своему множеству id.
+		tabs = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
+		mine = [t for t in tabs if t['tab_id'] in ours]
+		closed = 0
+		for tab in mine:
+			cl = await session.call_tool('close', {'tab_id': str(tab['tab_id'])})
+			closed += 0 if cl.isError else 1
+		print(f'  cleanup: closed {closed}/{len(mine)} of our tabs')
+		if mine and closed == len(mine):
+			ok('journal run cleaned up its tabs', f'{closed}')
+		else:
+			bad('journal run cleaned up its tabs', f'{closed}/{len(mine)}')
 
 
 async def index_of(session, needle: str) -> int | None:

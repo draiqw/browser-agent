@@ -66,6 +66,18 @@ if/elif-дispatcher'ом. Наружу из браузерных примити�
 ``Runtime.evaluate`` до и один после (~2-6 мс, ~40-90 символов в ответе);
 подробности и вторая ступень — у ``_DELTA_PROBE_JS`` и ``_delta_end``.
 
+И ещё одно общее — ЖУРНАЛ И МАКРОСЫ (JOURNAL_CONTRACT.md). Каждое действие,
+меняющее состояние, пишется в ``journal.record`` вместе с полным хендлом
+элемента (``resolve.describe_handle`` — ровно тот dict, который принимается
+обратно как ``hint``), URL до и после, уже посчитанной дельтой и исходом
+(``ok`` / ``noop`` / ``error``). Из журнала собирается макрос
+(``journal.to_macro``), который прогоняется без модели в цикле
+(``macro.run``) — повтор стоит на хендлах, а не на индексах, поэтому переживает
+перезагрузку страницы. Наружу это выведено четырьмя инструментами:
+``journal_list`` -> ``macro_save`` -> ``macro_run``, плюс ``macro_list``.
+Журнал — наблюдатель: его отсутствие или падение НЕ ломает действие, а цена
+записи (медиана 0.90 мс) держится ниже цены дельты, к которой она пристёгнута.
+
 И общее для ВСЕХ действий: ``_action_result_text`` проверяет ``ActionResult`` не
 только на ``error``, но и по таблице ``NOOP_MARKERS`` — шесть мест browser-use
 возвращают «ничего не сделано» обычным успешным результатом (issues #5361,
@@ -85,6 +97,9 @@ if/elif-дispatcher'ом. Наружу из браузерных примити�
 ``BU_MCP_ALLOWED_DOMAINS``    allowlist доменов через запятую, пустая = без ограничений
 ``BU_MCP_STATE_MAX_CHARS``    дефолтный бюджет дерева для browser_state (40000)
 ``BU_MCP_HYDRATE_TIMEOUT``    дефолтный бюджет стадии гидрации в browser_navigate (3.0)
+``BU_MCP_HEADLESS``           режим браузера, который browser-use поднимет САМ (по умолчанию 1)
+``BU_MCP_JOURNAL``            0 полностью выключает журнал (читает bu_mcp.journal)
+``BU_MCP_HOME``               корень журналов и макросов (по умолчанию ~/.config/bu-mcp)
 """
 
 from __future__ import annotations
@@ -106,6 +121,7 @@ import logging
 import re
 import tempfile
 import time
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, NamedTuple
 
@@ -241,7 +257,7 @@ NOOP_MARKERS: tuple[NoopMarker, ...] = (
 		code='stale-index',
 		source=(
 			'browser_use/tools/service.py — _click_by_index / input / dropdown_options / select_dropdown: '
-			"после `node = await browser_session.get_element_by_index(...)` -> None возвращают "
+			'после `node = await browser_session.get_element_by_index(...)` -> None возвращают '
 			"`ActionResult(extracted_content=f'Element index {i} not available - page may have changed. "
 			"Try refreshing browser state.')` БЕЗ error=. Issues #5361, #5438."
 		),
@@ -257,7 +273,7 @@ NOOP_MARKERS: tuple[NoopMarker, ...] = (
 		source=(
 			'browser_use/tools/service.py — find_text: ОДИН `except Exception` вокруг '
 			'`event.event_result(...)` покрывает и «текста нет», и «CDP отвалился», и обе ветки '
-			"отдают `ActionResult(extracted_content=f\"Text '{t}' not found or not visible on page\")` "
+			'отдают `ActionResult(extracted_content=f"Text \'{t}\' not found or not visible on page")` '
 			'БЕЗ error=.'
 		),
 		hint='The page was not scrolled.',
@@ -274,13 +290,13 @@ NOOP_MARKERS: tuple[NoopMarker, ...] = (
 		hint='The element is not a dropdown, or its options are not populated yet.',
 	),
 	NoopMarker(
-		pattern=re.compile(r"is not one of the available options"),
+		pattern=re.compile(r'is not one of the available options'),
 		actions=frozenset({'select_dropdown'}),
 		code='option-not-available',
 		source=(
 			'browser_use/browser/watchdogs/default_action_watchdog.py — on_SelectDropdownOptionEvent '
 			"при success=false возвращает short_term_memory='Available dropdown options  are:...' и "
-			'long_term_memory="Couldn\'t select the dropdown option as \'X\' is not one of the '
+			"long_term_memory=\"Couldn't select the dropdown option as 'X' is not one of the "
 			'available options."; service.py select_dropdown отдаёт их как обычный ActionResult без error=.'
 		),
 		hint='The selection did NOT change. Pick one of the options listed above verbatim.',
@@ -506,6 +522,45 @@ DELTA_RECHECK_DELAY = 0.12
 
 
 # --------------------------------------------------------------------------- #
+# Журнал действий и макросы (JOURNAL_CONTRACT.md)
+# --------------------------------------------------------------------------- #
+
+#: Инструменты, чей вызов пишется в журнал: ровно те, что МЕНЯЮТ состояние.
+#: Наблюдения (``browser_state``, ``browser_screenshot``, ``find_elements``,
+#: ``evaluate``) сюда не входят — их всё равно выкидывает ``journal.to_macro``,
+#: и писать их значило бы платить за мусор на каждом шаге.
+JOURNALED_TOOLS = frozenset(
+	{
+		'browser_click',
+		'browser_type',
+		'browser_hover',
+		'browser_navigate',
+		'select_dropdown',
+		'send_keys',
+		'scroll',
+	}
+)
+
+#: Ключи записи по JOURNAL_CONTRACT.md. Отдельной константой, чтобы конверт
+#: можно было проверить тестом дословно, а не «на глаз».
+JOURNAL_FIELDS = ('ts', 'tool', 'params', 'handle', 'url_before', 'url_after', 'delta', 'outcome', 'error')
+
+#: Запись журнала ТЕКУЩЕГО вызова. ``ContextVar``, а не поле объекта: низкоуровневый
+#: ``mcp.server.Server`` вызывает хендлеры в общем событийном цикле и не обязан
+#: сериализовать их между собой, поэтому общее поле склеило бы записи двух
+#: одновременных действий в одну. ``ContextVar`` живёт в контексте задачи.
+_JOURNAL_ENTRY: ContextVar[dict[str, Any] | None] = ContextVar('bu_mcp_journal_entry', default=None)
+
+#: Корень конфигов (JOURNAL_CONTRACT.md: ``~/.config/bu-mcp/``).
+BU_MCP_HOME = Path(os.getenv('BU_MCP_HOME') or (Path.home() / '.config' / 'bu-mcp'))
+
+#: Имя макроса становится именем файла, поэтому проверяется БЕЛЫМ списком, а не
+#: «вырежем ../». Санитайзинг молча превращает чужое имя в своё; отказ — не
+#: превращает. Здесь, как и везде в этом слое, fail closed.
+MACRO_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
+
+
+# --------------------------------------------------------------------------- #
 # Ленивая загрузка наших модулей
 # --------------------------------------------------------------------------- #
 
@@ -547,7 +602,11 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 		'properties': {
 			'url': {'type': 'string', 'description': 'URL to open.'},
 			'new_tab': {'type': 'boolean', 'default': False, 'description': 'Open in a new tab instead of the current one.'},
-			'timeout': {'type': 'number', 'default': 10.0, 'description': 'Seconds to wait for the new document to commit and fire load.'},
+			'timeout': {
+				'type': 'number',
+				'default': 10.0,
+				'description': 'Seconds to wait for the new document to commit and fire load.',
+			},
 			'hydrate': {
 				'type': 'number',
 				'default': DEFAULT_HYDRATE_TIMEOUT,
@@ -565,7 +624,11 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 		'type': 'object',
 		'properties': {
 			'index': {'type': 'integer', 'minimum': 1, 'description': 'Element index from browser_state.'},
-			'timeout': {'type': 'number', 'default': 8.0, 'description': 'Seconds to wait for the page to settle after the click.'},
+			'timeout': {
+				'type': 'number',
+				'default': 8.0,
+				'description': 'Seconds to wait for the page to settle after the click.',
+			},
 		},
 		'required': ['index'],
 	},
@@ -604,6 +667,73 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 			'full_page': {'type': 'boolean', 'default': False, 'description': 'Capture the whole scrollable page.'},
 		},
 	},
+	'journal_list': {
+		'type': 'object',
+		'properties': {
+			'limit': {
+				'type': 'integer',
+				'default': 50,
+				'minimum': 1,
+				'description': 'How many of the most recent entries to return.',
+			},
+			'full': {
+				'type': 'boolean',
+				'default': False,
+				'description': (
+					'Return each entry verbatim, including the full element handle and delta receipt, '
+					'instead of the one-line summary.'
+				),
+			},
+			'path': {
+				'type': 'string',
+				'description': 'Journal file to read. Defaults to the journal of the current session.',
+			},
+		},
+	},
+	'macro_save': {
+		'type': 'object',
+		'properties': {
+			'name': {'type': 'string', 'description': 'Macro name; becomes the file name, so [A-Za-z0-9._-] only.'},
+			'include': {
+				'type': 'array',
+				'items': {'type': 'integer'},
+				'description': 'Exact journal positions to use, as printed in the `i` field by journal_list.',
+			},
+			'limit': {
+				'type': 'integer',
+				'default': 20,
+				'minimum': 1,
+				'description': 'Without `include`: use the last N journal entries.',
+			},
+			'path': {'type': 'string', 'description': 'Journal file to build from. Defaults to the current session.'},
+		},
+		'required': ['name'],
+	},
+	'macro_list': {
+		'type': 'object',
+		'properties': {
+			'name': {'type': 'string', 'description': 'Show this macro in full. Omit to list every saved macro.'},
+		},
+	},
+	'macro_run': {
+		'type': 'object',
+		'properties': {
+			'name': {'type': 'string', 'description': 'Macro to replay.'},
+			'vars': {
+				'type': 'object',
+				'description': 'Overrides for the macro variables (the text that was captured when it was recorded).',
+			},
+			'strict': {
+				'type': 'boolean',
+				'default': True,
+				'description': (
+					'Stop at the first step whose effect does not match what was recorded. false runs to the '
+					'end and collects every mismatch. Either way a failed run is an ERROR, not a report.'
+				),
+			},
+		},
+		'required': ['name'],
+	},
 }
 
 _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
@@ -635,8 +765,25 @@ _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 		'element cannot be brought into the viewport, the call FAILS instead of pointing somewhere else. '
 		'Returns what is actually under the pointer and what changed on the page.'
 	),
-	'browser_screenshot': (
-		'PNG screenshot of the current viewport, downscaled so its longest side is at most max_dim.'
+	'browser_screenshot': ('PNG screenshot of the current viewport, downscaled so its longest side is at most max_dim.'),
+	'journal_list': (
+		'What has been recorded so far. Every state-changing action (browser_click, browser_type, '
+		'browser_hover, browser_navigate, select_dropdown, send_keys, scroll) is journalled automatically '
+		'with the element handle it acted on, the URL before and after, the delta receipt and the outcome '
+		'(ok / noop / error). Each row carries an absolute position `i` — feed those to macro_save.'
+	),
+	'macro_save': (
+		'Collapse journal entries into a replayable macro and store it on disk. Observations are dropped, '
+		'state-changing steps are kept together with the element handle that identifies each target, and '
+		'typed text becomes a named variable you can override at run time. The macro survives a page '
+		'reload because it replays handles, not indices.'
+	),
+	'macro_list': ('Saved macros: names, step counts and variables. With a name, the whole macro including its steps.'),
+	'macro_run': (
+		'Replay a saved macro with no model in the loop. Each step re-identifies its element from the '
+		'stored handle (backendNodeId, then xpath, then accessible name, then a unique attribute) and its '
+		'effect is compared with what was recorded. A step that cannot be resolved or does not reproduce '
+		'FAILS the call — it never comes back as a successful-looking report.'
 	),
 }
 
@@ -745,12 +892,58 @@ class BuMcpServer:
 
 	# -- сессия ------------------------------------------------------------- #
 
+	@staticmethod
+	def _headless() -> bool:
+		"""Режим браузера, который browser-use поднимет САМ. По умолчанию headless."""
+		return os.getenv('BU_MCP_HEADLESS', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+
+	@classmethod
+	def _profile(cls, cdp_url: str) -> BrowserProfile:
+		"""Профиль подключения. ``headless`` проставляется ЯВНО, viewport — не трогается.
+
+		Про headless. Мы всегда ПОДКЛЮЧАЕМСЯ к уже работающему Chrome по
+		``cdp_url``, а в этом режиме флаг ни на что не влияет: режим окна
+		определился при запуске браузера, и ``on_BrowserStartEvent`` вообще не
+		доходит до ветки запуска (``if not self.cdp_url``). То есть это НЕ защита
+		от выскакивающего окна в нормальной работе — считать её таковой нельзя.
+		Значение имеет ровно один путь: если ``BU_MCP_CDP_URL`` окажется пустым
+		или недостижимым так, что browser-use решит поднять браузер сам. Тогда
+		без явного значения ``headless`` остаётся ``None``, и
+		``detect_display_configuration`` выводит его из наличия дисплея — на
+		машине владельца это ``False``, то есть окно поверх всего. Ставим явно,
+		чтобы значение не зависело ни от дисплея, ни от ``config.json``
+		(его наш путь и так не читает: ``BrowserProfile`` конструируется здесь
+		напрямую, а ``load_browser_use_config`` живёт в CLI/штатном MCP).
+
+		Про viewport. ``headless=True`` тянет за собой побочку, которая на пути
+		ПОДКЛЮЧЕНИЯ уже совсем не безобидна: ``detect_display_configuration``
+		выставляет ``viewport = screen`` и ``no_viewport = False``, после чего
+		browser-use шлёт ``Emulation.setDeviceMetricsOverride`` на каждую вкладку,
+		которую создаёт ИЛИ на которую переводит фокус
+		(``on_TabCreatedEvent`` / ``on_AgentFocusChangedEvent``). А фокус он
+		переводит в том числе автоматически — на произвольную соседнюю вкладку,
+		когда наша отсоединяется. Это значит «поменять размер вьюпорта в чужой
+		вкладке владельца», чего мы себе не позволяем. Поэтому при подключении
+		геометрия возвращается к тому, чем она была без явного headless:
+		``viewport=None``, ``no_viewport=True`` — то есть никакого override.
+		Для ветки запуска (``cdp_url`` пуст) не трогаем ничего: там viewport
+		описывает НАШ браузер и обязан работать штатно.
+		"""
+		profile = BrowserProfile(cdp_url=cdp_url, is_local=True, headless=cls._headless())
+		if cdp_url and profile.viewport is not None and not profile.no_viewport:
+			try:
+				profile.viewport = None
+				profile.no_viewport = True
+			except Exception as exc:  # noqa: BLE001
+				logger.warning('cannot drop the viewport override for a browser we did not launch: %r', exc)
+		return profile
+
 	async def _ensure_session(self) -> tuple[BrowserSession, Tools]:
 		"""Поднять сессию к живому Chrome на первом обращении к браузеру."""
 		async with self._session_lock:
 			if self._session is None:
 				cdp_url = os.getenv('BU_MCP_CDP_URL', 'http://127.0.0.1:9222')
-				profile = BrowserProfile(cdp_url=cdp_url, is_local=True)
+				profile = self._profile(cdp_url)
 				session = BrowserSession(browser_profile=profile)
 				await session.start()
 				self._session = session
@@ -806,9 +999,7 @@ class BuMcpServer:
 
 		# 1. Наши переопределения — всегда сверху и всегда доступны.
 		for name, schema in _OVERRIDE_SCHEMAS.items():
-			out.append(
-				types.Tool(name=name, description=_OVERRIDE_DESCRIPTIONS[name], inputSchema=schema)
-			)
+			out.append(types.Tool(name=name, description=_OVERRIDE_DESCRIPTIONS[name], inputSchema=schema))
 
 		# 2. Мост к реестру.
 		for name, action in tools.registry.registry.actions.items():
@@ -1075,6 +1266,8 @@ class BuMcpServer:
 		# впустую опрашивала фрейм всё стартовое окно (2.5 с при timeout=10).
 		# Замерено: 45 из 48 навигаций в BENCH.md.
 		baseline = await waiting_mod.navigation_baseline(session)
+		# baseline уже держит URL прежнего документа — второй раз за ним не ходим.
+		self._journal_note(url_before=baseline.get('url'))
 
 		try:
 			result = await tools.registry.execute_action(
@@ -1087,14 +1280,14 @@ class BuMcpServer:
 			raise ToolError(f'navigate to {url!r} failed: {type(exc).__name__}: {exc}') from exc
 
 		action_text = self._action_result_text('navigate', result)
-		waiting = await waiting_mod.wait_after_navigation(
-			session, timeout=float(args.get('timeout') or 10.0), baseline=baseline
-		)
+		waiting = await waiting_mod.wait_after_navigation(session, timeout=float(args.get('timeout') or 10.0), baseline=baseline)
 		await self._hydrate(waiting, args.get('hydrate'))
+		url = await self._current_url()
+		self._journal_note(url_after=url)
 		return self._text(
 			{
 				'action': action_text,
-				'url': await self._current_url(),
+				'url': url,
 				'waiting': waiting,
 			},
 			compact=True,
@@ -1261,9 +1454,7 @@ class BuMcpServer:
 		)
 
 	@staticmethod
-	def _delta_diff(
-		before: dict[str, Any], after: dict[str, Any], extra_significant: tuple[str, ...] = ()
-	) -> dict[str, Any]:
+	def _delta_diff(before: dict[str, Any], after: dict[str, Any], extra_significant: tuple[str, ...] = ()) -> dict[str, Any]:
 		"""Чистое сравнение двух снимков -> изменившиеся поля + флаг значимости."""
 
 		def show(key: str, value: Any) -> Any:
@@ -1335,6 +1526,126 @@ class BuMcpServer:
 				f'without checking browser_state.'
 			)
 		return payload
+
+	# --- журнал действий (JOURNAL_CONTRACT.md) ------------------------------ #
+
+	@staticmethod
+	def _journal_open(tool: str, params: dict[str, Any]) -> dict[str, Any]:
+		"""Пустая запись со всеми контрактными ключами и временем начала.
+
+		Ключи проставляются ВСЕ и сразу, даже пустые: читателю журнала (и
+		``to_macro``) не приходится гадать, «поля нет» или «поле не заполнилось».
+		"""
+		return {
+			'ts': time.time(),
+			'tool': tool,
+			'params': dict(params or {}),
+			'handle': None,
+			'url_before': None,
+			'url_after': None,
+			'delta': None,
+			'outcome': None,
+			'error': None,
+			# Цена самого журнала: снятие хендла + сборка конверта. В контракте
+			# этого поля нет, но без него нечем ответить на вопрос «сколько
+			# стоит запись», а он тут ровно такой же законный, как у delta.
+			'cost_ms': 0.0,
+		}
+
+	@staticmethod
+	def _journal_note(**fields: Any) -> None:
+		"""Дописать поля в запись текущего вызова. Вне журналируемого вызова — no-op."""
+		entry = _JOURNAL_ENTRY.get()
+		if entry is not None:
+			entry.update(fields)
+
+	async def _journal_handle(self, session: BrowserSession, index: Any) -> None:
+		"""Снять полный хендл элемента в запись текущего вызова.
+
+		``describe_handle`` возвращает ровно тот dict, который ``resolve_index``
+		принимает обратно как ``hint`` — это и есть то, на чём стоит повтор без
+		модели в цикле. Индексы в макрос не годятся: они живут ровно один снимок.
+
+		Вызывать ДО действия и по УЖЕ разрешённому индексу: после клика элемент
+		может исчезнуть, а до резолва индекс мог указывать не туда.
+
+		Fail-open: не смогли — записываем причину и идём дальше. Замерено на
+		headless Chrome: медиана 0.94 мс (min 0.78, max 2.94) — дешевле нижней
+		границы дельты (2.2 мс).
+		"""
+		entry = _JOURNAL_ENTRY.get()
+		if entry is None or index is None:
+			return
+		started = time.perf_counter()
+		try:
+			resolve_mod = importlib.import_module('bu_mcp.resolve')
+			entry['handle'] = await resolve_mod.describe_handle(session, int(index))
+		except Exception as exc:  # noqa: BLE001
+			entry['handle_error'] = f'{type(exc).__name__}: {exc}'
+		entry['cost_ms'] = float(entry.get('cost_ms') or 0.0) + (time.perf_counter() - started) * 1000.0
+
+	@staticmethod
+	def _journal_outcome(entry: dict[str, Any]) -> str:
+		"""``ok`` / ``noop`` / ``error`` из того, что уже собрано в записи.
+
+		``noop`` — это не только явный ``NOOP_MARKERS``, но и пустая дельта при
+		рапорте об успехе (``no_effect``). Смысл тот же, что у флага в ответе:
+		шаг, после которого на странице ничего не сдвинулось, нельзя считать
+		сделанным — ни клиенту, ни ``to_macro``.
+		"""
+		if entry.get('error'):
+			return 'error'
+		delta = entry.get('delta')
+		if isinstance(delta, dict) and delta.get('no_effect'):
+			return 'noop'
+		return 'ok'
+
+	@classmethod
+	def _journal_write(cls, entry: dict[str, Any]) -> None:
+		"""Отдать запись в ``journal.record``. НИКОГДА не бросает наружу.
+
+		Журнал — наблюдатель, а не участник. Если модуля нет (он пишется
+		отдельно) или запись сломалась, действие всё равно обязано вернуть
+		клиенту свой результат: потерять журнал дешевле, чем потерять действие.
+		Поэтому и импорт, и сама запись гасятся в лог.
+		"""
+		started = time.perf_counter()
+		if entry.get('outcome') is None:
+			entry['outcome'] = cls._journal_outcome(entry)
+		try:
+			journal_mod = importlib.import_module('bu_mcp.journal')
+		except Exception as exc:  # noqa: BLE001
+			logger.warning('bu_mcp.journal is unavailable, %s was not recorded: %r', entry.get('tool'), exc)
+			return
+		entry['cost_ms'] = round(float(entry.get('cost_ms') or 0.0) + (time.perf_counter() - started) * 1000.0, 3)
+		try:
+			journal_mod.record(entry)
+		except Exception as exc:  # noqa: BLE001
+			logger.warning('journal.record failed for %s: %r', entry.get('tool'), exc)
+
+	async def _journaled(self, tool: str, args: dict[str, Any], run: Any) -> list[types.ContentBlock]:
+		"""Выполнить инструмент и записать в журнал ЛЮБОЙ его исход.
+
+		Отказ пишется наравне с успехом: журнал существует, чтобы восстановить,
+		что происходило, а не только то, что получилось. Исключение всегда
+		переподнимается — журнал не глотает ошибок инструмента.
+
+		Запись идёт в ``finally``, то есть даже при отмене задачи (``CancelledError``)
+		мы не теряем факт того, что действие было начато.
+		"""
+		entry = self._journal_open(tool, args)
+		token = _JOURNAL_ENTRY.set(entry)
+		try:
+			return await run(args)
+		except NoopResultError as exc:
+			entry['outcome'], entry['error'] = 'noop', str(exc)
+			raise
+		except BaseException as exc:
+			entry['outcome'], entry['error'] = 'error', f'{type(exc).__name__}: {exc}'
+			raise
+		finally:
+			_JOURNAL_ENTRY.reset(token)
+			self._journal_write(entry)
 
 	# --- browser_hover ------------------------------------------------------ #
 
@@ -1441,7 +1752,9 @@ class BuMcpServer:
 		await self._check_domain_gate('click')
 
 		node, live_index, info = await self._resolve(session, int(args['index']), what='hovered')
+		await self._journal_handle(session, live_index)
 		before = await self._delta_start(session)
+		self._journal_note(url_before=before.get('url'), resolved_index=live_index)
 		geo = await self._hover_point(session, node, live_index)
 		cdp_session, session_id, point = geo['cdp'], geo['session_id'], geo['point']
 
@@ -1482,13 +1795,12 @@ class BuMcpServer:
 			'waiting': waiting,
 			'delta': delta,
 		}
+		self._journal_note(url_after=payload['url'], delta=delta)
 		if point['clipped']:
 			payload['clipped'] = True
 		return self._text(payload, compact=True)
 
-	async def _hover_hit(
-		self, cdp_session: Any, session_id: Any, backend_node_id: Any, point: dict[str, Any]
-	) -> dict[str, Any]:
+	async def _hover_hit(self, cdp_session: Any, session_id: Any, backend_node_id: Any, point: dict[str, Any]) -> dict[str, Any]:
 		"""Что реально под курсором. Fail-open: не смогли — ``{'hit': None, 'self': None}``."""
 		try:
 			resolved = await cdp_session.cdp_client.send.DOM.resolveNode(
@@ -1519,9 +1831,13 @@ class BuMcpServer:
 		await self._check_domain_gate('click')
 
 		_node, live_index, info = await self._resolve(session, int(args['index']))
+		# Хендл в журнал снимается ЗДЕСЬ: индекс уже разрешён, элемент ещё жив.
+		await self._journal_handle(session, live_index)
 		tabs_before = await self._tab_snapshot(session)
 		# Снимок вкладок уже есть — второй раз за ним не ходим.
 		before = await self._delta_start(session, tabs=tabs_before)
+		# URL «до» берётся из пробы дельты, а не отдельным вызовом: он там уже есть.
+		self._journal_note(url_before=before.get('url'), resolved_index=live_index)
 		try:
 			result = await tools.registry.execute_action(
 				'click',
@@ -1541,12 +1857,16 @@ class BuMcpServer:
 		action_text, tab_info = self._reconcile_new_tab(action_text, tabs_before, tabs_after)
 		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
 		delta = await self._delta_end(session, before, tabs=tabs_after)
+		url = await self._current_url()
+		# `tab` в записи — сверка вкладок, а не украшение: по ней видно, что шаг
+		# сценария был многовкладочным (to_macro такие шаги помечает).
+		self._journal_note(url_after=url, delta=delta, tab=tab_info)
 		return self._text(
 			{
 				'action': action_text,
 				**info,
 				'tab': tab_info,
-				'url': await self._current_url(),
+				'url': url,
 				'waiting': waiting,
 				'delta': delta,
 			},
@@ -1570,9 +1890,7 @@ class BuMcpServer:
 		return snapshot
 
 	@classmethod
-	def _reconcile_new_tab(
-		cls, text: str, before: dict[str, Any], after: dict[str, Any]
-	) -> tuple[str, dict[str, Any]]:
+	def _reconcile_new_tab(cls, text: str, before: dict[str, Any], after: dict[str, Any]) -> tuple[str, dict[str, Any]]:
 		"""Сверить апстримный рапорт о новой вкладке с фактическим фокусом.
 
 		Issue #5529: ``_detect_new_tab_opened`` в browser_use/tools/service.py
@@ -1658,7 +1976,9 @@ class BuMcpServer:
 		await self._check_domain_gate('input')
 
 		_node, live_index, info = await self._resolve(session, int(args['index']), what='typed into')
+		await self._journal_handle(session, live_index)
 		before = await self._delta_start(session)
+		self._journal_note(url_before=before.get('url'), resolved_index=live_index)
 		try:
 			result = await tools.registry.execute_action(
 				'input',
@@ -1672,8 +1992,10 @@ class BuMcpServer:
 		action_text = self._action_result_text('input', result)
 		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
 		delta = await self._delta_end(session, before)
+		url = await self._current_url()
+		self._journal_note(url_after=url, delta=delta)
 		return self._text(
-			{'action': action_text, **info, 'url': await self._current_url(), 'waiting': waiting, 'delta': delta},
+			{'action': action_text, **info, 'url': url, 'waiting': waiting, 'delta': delta},
 			compact=True,
 		)
 
@@ -1730,10 +2052,16 @@ class BuMcpServer:
 		session, _ = await self._ensure_session()
 		await self._check_domain_gate(name)
 		before = await self._delta_start(session)
+		self._journal_note(url_before=before.get('url'))
+		# У send_keys индекса нет, у select_dropdown есть — хендл снимается только
+		# там, где ему есть на что смотреть.
+		await self._journal_handle(session, args.get('index'))
 		text = await self._run_registry_action(name, args)
 		extra = ('active',) if name in self.DELTA_FOCUS_COUNTS else ()
 		delta = await self._delta_end(session, before, extra_significant=extra)
-		return self._text({'action': text, 'url': await self._current_url(), 'delta': delta}, compact=True)
+		url = await self._current_url()
+		self._journal_note(url_after=url, delta=delta)
+		return self._text({'action': text, 'url': url, 'delta': delta}, compact=True)
 
 	# --- scroll: проверка фактом ------------------------------------------- #
 
@@ -1805,9 +2133,14 @@ class BuMcpServer:
 		session, tools = await self._ensure_session()
 		await self._check_domain_gate('scroll')
 
+		# get_current_page_url() читается из session_manager, не по CDP (замерено:
+		# медиана 0.000 мс), так что журнал здесь ничего не стоит.
+		self._journal_note(url_before=await self._current_url())
+
 		index = args.get('index')
 		node = None
 		if index is not None and int(index) != 0:
+			await self._journal_handle(session, index)
 			try:
 				node = await session.get_element_by_index(int(index))
 			except Exception:  # noqa: BLE001
@@ -1815,9 +2148,7 @@ class BuMcpServer:
 
 		before = await self._scroll_probe(session, node)
 		try:
-			result = await tools.registry.execute_action(
-				'scroll', args, browser_session=session, file_system=self._file_system
-			)
+			result = await tools.registry.execute_action('scroll', args, browser_session=session, file_system=self._file_system)
 		except ToolError:
 			raise
 		except Exception as exc:  # noqa: BLE001
@@ -1833,7 +2164,18 @@ class BuMcpServer:
 			await asyncio.sleep(0.1)
 			after = await self._scroll_probe(session, node)
 
-		return self._text(self._scroll_verdict(args, before, after, upstream), compact=True)
+		# _scroll_verdict умеет бросить ToolError (прокрутка была заблокирована) —
+		# тогда запись в журнал сделает _journaled со статусом error.
+		verdict = self._scroll_verdict(args, before, after, upstream)
+		self._journal_note(
+			url_after=await self._current_url(),
+			delta={
+				'changed': verdict.get('scrolled'),
+				'status': verdict.get('status'),
+				'fields': {'scroll': verdict.get('delta')} if verdict.get('delta') else {},
+			},
+		)
+		return self._text(verdict, compact=True)
 
 	@classmethod
 	def _scroll_verdict(
@@ -1877,11 +2219,7 @@ class BuMcpServer:
 
 		if cls._scroll_moved(before, after):
 			payload.update(scrolled=True, status='scrolled')
-			at_end = (
-				int(ref_after.get('y', 0)) >= int(ref_after.get('max_y', 0))
-				if down
-				else int(ref_after.get('y', 0)) <= 0
-			)
+			at_end = int(ref_after.get('y', 0)) >= int(ref_after.get('max_y', 0)) if down else int(ref_after.get('y', 0)) <= 0
 			payload['at_end'] = at_end
 			tail = f' — {"bottom" if down else "top"} reached.' if at_end else '.'
 			if delta_y:
@@ -1923,14 +2261,11 @@ class BuMcpServer:
 			payload.update(scrolled=False, status='at-end', at_end=True)
 			nothing = int(ref_before.get('max_y', 0)) <= 1
 			payload['action'] = (
-				(
-					f'Nothing scrolled: this {scope} does not scroll at all (content fits). '
-					if nothing
-					else f'Nothing scrolled: already at the {"bottom" if down else "top"} of this {scope} '
-					f'(y={ref_before.get("y", 0)} of {ref_before.get("max_y", 0)}). '
-				)
-				+ f'browser-use reported {upstream.strip()!r}; that is its fixed string, not a measurement.'
-			)
+				f'Nothing scrolled: this {scope} does not scroll at all (content fits). '
+				if nothing
+				else f'Nothing scrolled: already at the {"bottom" if down else "top"} of this {scope} '
+				f'(y={ref_before.get("y", 0)} of {ref_before.get("max_y", 0)}). '
+			) + f'browser-use reported {upstream.strip()!r}; that is its fixed string, not a measurement.'
 			return payload
 
 		raise ToolError(
@@ -1961,9 +2296,7 @@ class BuMcpServer:
 
 		before = await self._tab_snapshot(session)
 		try:
-			result = await tools.registry.execute_action(
-				'switch', args, browser_session=session, file_system=self._file_system
-			)
+			result = await tools.registry.execute_action('switch', args, browser_session=session, file_system=self._file_system)
 		except ToolError:
 			raise
 		except Exception as exc:  # noqa: BLE001
@@ -1989,6 +2322,299 @@ class BuMcpServer:
 			},
 			compact=True,
 		)
+
+	# --- журнал и макросы: инструменты ------------------------------------- #
+
+	@staticmethod
+	def _macro_dir() -> Path:
+		"""Каталог макросов. Источник правды — ``bu_mcp.journal``, а не сервер.
+
+		Путь зафиксирован в JOURNAL_CONTRACT.md (``~/.config/bu-mcp/macros/``), но
+		считает его ``journal.home()``, и он же честно смотрит на ``BU_MCP_HOME``.
+		Второй вычислитель того же пути — это ровно тот баг, который проявится
+		один раз и в самый неудобный момент, поэтому здесь только запасной
+		вариант на случай, если модуля ещё нет.
+		"""
+		try:
+			journal_mod = importlib.import_module('bu_mcp.journal')
+			return Path(journal_mod.home()) / 'macros'
+		except Exception:  # noqa: BLE001
+			return BU_MCP_HOME / 'macros'
+
+	@staticmethod
+	def _macro_name(raw: Any) -> str:
+		"""Проверить имя макроса белым списком. Не подошло — ``ToolError``, не санитайзинг."""
+		name = str(raw or '').strip()
+		if not MACRO_NAME_RE.match(name):
+			raise ToolError(
+				f'Bad macro name {name!r}. Allowed: 1-64 characters, letters/digits/dot/dash/underscore, '
+				f'starting with a letter or a digit. The name becomes a file name, so anything else '
+				f'(slashes, "..", empty) is REFUSED rather than quietly rewritten into something else.'
+			)
+		return name
+
+	@classmethod
+	def _macro_path(cls, name: str) -> Path:
+		"""Файл макроса. Имя уже проверено ``_macro_name``, здесь только путь."""
+		try:
+			journal_mod = importlib.import_module('bu_mcp.journal')
+			return Path(journal_mod.macro_path(name))
+		except Exception:  # noqa: BLE001
+			return cls._macro_dir() / f'{name}.json'
+
+	@staticmethod
+	def _macro_urls(macro: Any) -> list[str]:
+		"""Все URL, зашитые в шаги макроса (обход в глубину по ``url``-ключам)."""
+		found: list[str] = []
+
+		def walk(node: Any) -> None:
+			if isinstance(node, dict):
+				for key, value in node.items():
+					if key == 'url' and isinstance(value, str) and value.strip():
+						found.append(value)
+					else:
+						walk(value)
+			elif isinstance(node, list):
+				for value in node:
+					walk(value)
+
+		walk((macro or {}).get('steps'))
+		return found
+
+	def _macro_domain_gate(self, macro: dict[str, Any]) -> None:
+		"""Проверить allowlist по URL, зашитым в шаги макроса.
+
+		Без этого макрос был бы дырой в доменной политике: его шаги исполняет
+		``macro.py`` напрямую, минуя ``_check_domain_gate``, поэтому сохранённый
+		когда-то ``browser_navigate`` увёл бы браузер куда угодно. Проверка идёт
+		ДО первого шага: частично выполненный запрещённый макрос хуже, чем
+		невыполненный.
+		"""
+		if not self._allowed_domains:
+			return
+		for url in self._macro_urls(macro):
+			if not self._domain_allowed(url, treat_blank_as_allowed=False):
+				raise ToolError(
+					f'This macro carries a step pointing at {url!r}, which does not match '
+					f'BU_MCP_ALLOWED_DOMAINS ({", ".join(self._allowed_domains)}). Refusing to run '
+					f'any of it: macro steps execute directly and would bypass the per-action gate.'
+				)
+
+	@staticmethod
+	def _journal_summary(entry: dict[str, Any]) -> dict[str, Any]:
+		"""Выжимка записи: достаточно, чтобы выбрать шаги для макроса, и не больше.
+
+		Полный хендл (xpath, атрибуты, session_id) в листинге не нужен — он нужен
+		повтору. Печатать его на каждую строку значило бы утроить ответ ради
+		данных, которые модель всё равно не читает.
+		"""
+		handle = entry.get('handle') or {}
+		delta = entry.get('delta') or {}
+		out: dict[str, Any] = {
+			'ts': entry.get('ts'),
+			'tool': entry.get('tool'),
+			'params': entry.get('params'),
+			'outcome': entry.get('outcome'),
+			'url': entry.get('url_after') or entry.get('url_before'),
+		}
+		if isinstance(handle, dict) and handle:
+			short = {k: handle.get(k) for k in ('index', 'tag', 'role', 'accessible_name') if handle.get(k) is not None}
+			out['handle'] = short
+		if isinstance(delta, dict) and delta:
+			out['delta'] = {k: delta[k] for k in ('changed', 'status', 'no_effect') if k in delta}
+		if entry.get('error'):
+			out['error'] = str(entry['error'])[:200]
+		if entry.get('cost_ms') is not None:
+			out['cost_ms'] = entry.get('cost_ms')
+		return out
+
+	def _journal_entries(self, args: dict[str, Any]) -> tuple[Any, list[dict[str, Any]], Path | None]:
+		"""``journal.read`` с понятной ошибкой + путь, из которого читали."""
+		journal_mod = _bu_mcp('journal')
+		path = Path(str(args['path'])).expanduser() if args.get('path') else None
+		try:
+			entries = journal_mod.read(path)
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'journal.read({path}) failed: {type(exc).__name__}: {exc}') from exc
+		if not isinstance(entries, list):
+			raise ToolError(f'journal.read returned {type(entries).__name__}, expected a list of entries.')
+		return journal_mod, entries, path
+
+	async def _tool_journal_list(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""Что записалось. Позиция ``i`` — абсолютная, её принимает ``macro_save(include=...)``."""
+		journal_mod, entries, path = self._journal_entries(args)
+		try:
+			shown_path = str(path or journal_mod.current_path())
+		except Exception:  # noqa: BLE001
+			shown_path = str(path or '<unknown>')
+
+		total = len(entries)
+		limit = max(1, int(args.get('limit') or 50))
+		start = max(0, total - limit)
+		full = bool(args.get('full', False))
+		rows = []
+		for offset, entry in enumerate(entries[start:]):
+			row = dict(entry) if full else self._journal_summary(entry)
+			rows.append({'i': start + offset, **row})
+		return self._text(
+			{
+				'action': f'{len(rows)} of {total} journal entr(ies) from {shown_path}.',
+				'path': shown_path,
+				'total': total,
+				'returned': len(rows),
+				'entries': rows,
+			},
+			compact=True,
+		)
+
+	async def _tool_macro_save(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""Схлопнуть выбранные записи журнала в макрос и положить его на диск."""
+		name = self._macro_name(args.get('name'))
+		journal_mod, entries, _path = self._journal_entries(args)
+
+		include = args.get('include')
+		if include:
+			picked = []
+			for raw in include:
+				i = int(raw)
+				if not 0 <= i < len(entries):
+					raise ToolError(
+						f'Journal entry {i} does not exist: the journal holds {len(entries)} entr(ies) '
+						f'(valid positions 0..{max(0, len(entries) - 1)}). Call journal_list first and '
+						f'use the `i` values it prints.'
+					)
+				picked.append(entries[i])
+		else:
+			picked = entries[-max(1, int(args.get('limit') or 20)) :]
+
+		if not picked:
+			raise ToolError(
+				'Nothing to save: the journal is empty. Perform the actions first (they are recorded '
+				'automatically), check them with journal_list, then call macro_save.'
+			)
+
+		try:
+			macro = journal_mod.to_macro(picked, name=name)
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'journal.to_macro failed: {type(exc).__name__}: {exc}') from exc
+		if not isinstance(macro, dict):
+			raise ToolError(f'journal.to_macro returned {type(macro).__name__}, expected a macro dict.')
+
+		steps = macro.get('steps') or []
+		if not steps:
+			raise ToolError(
+				f'journal.to_macro produced a macro with no steps out of {len(picked)} journal entr(ies). '
+				f'Observations are dropped on purpose; pick entries whose `tool` actually changes state '
+				f'(browser_click / browser_type / browser_hover / browser_navigate / select_dropdown / '
+				f'send_keys / scroll).'
+			)
+
+		try:
+			path = Path(journal_mod.save_macro(macro))
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'Cannot write macro {name!r}: {type(exc).__name__}: {exc}') from exc
+
+		return self._text(
+			{
+				'action': (
+					f'Saved macro {name!r}: {len(steps)} step(s) out of {len(picked)} journal entr(ies). '
+					f'Run it with macro_run(name="{name}").'
+				),
+				'name': name,
+				'file': str(path),
+				'steps': len(steps),
+				'tools': [s.get('tool') for s in steps if isinstance(s, dict)],
+				'vars': macro.get('vars') or {},
+			},
+			compact=True,
+		)
+
+	async def _tool_macro_list(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""Без имени — что сохранено; с именем — макрос целиком."""
+		directory = self._macro_dir()
+		if args.get('name'):
+			name = self._macro_name(args['name'])
+			path = self._macro_path(name)
+			if not path.exists():
+				raise ToolError(f'No macro named {name!r} in {directory}. Call macro_list without a name to see what is saved.')
+			try:
+				macro = json.loads(path.read_text(encoding='utf-8'))
+			except Exception as exc:  # noqa: BLE001
+				raise ToolError(f'Macro {name!r} at {path} is not readable JSON: {type(exc).__name__}: {exc}') from exc
+			return self._text(
+				{
+					'action': f'Macro {name!r}: {len(macro.get("steps") or [])} step(s).',
+					'name': name,
+					'file': str(path),
+					'macro': macro,
+				},
+				compact=True,
+			)
+
+		rows: list[dict[str, Any]] = []
+		for path in sorted(directory.glob('*.json')) if directory.exists() else []:
+			row: dict[str, Any] = {'name': path.stem, 'file': str(path)}
+			try:
+				macro = json.loads(path.read_text(encoding='utf-8'))
+			except Exception as exc:  # noqa: BLE001
+				row['error'] = f'{type(exc).__name__}: {exc}'
+			else:
+				row['steps'] = len(macro.get('steps') or [])
+				row['tools'] = [s.get('tool') for s in (macro.get('steps') or []) if isinstance(s, dict)]
+				row['vars'] = sorted((macro.get('vars') or {}).keys()) if isinstance(macro.get('vars'), dict) else []
+			rows.append(row)
+		return self._text(
+			{'action': f'{len(rows)} macro(s) in {directory}.', 'dir': str(directory), 'macros': rows},
+			compact=True,
+		)
+
+	async def _tool_macro_run(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+		"""Прогнать сохранённый макрос. Провал шага — ЖЁСТКАЯ ошибка, а не отчёт.
+
+		``strict`` управляет только тем, останавливаться ли на первом расхождении
+		или дойти до конца, собрав их все. На видимость провала он НЕ влияет:
+		``ok == False`` — это ``ToolError`` в обоих режимах. Иначе получилось бы
+		ровно то, против чего написан весь остальной слой: успешный на вид ответ,
+		внутри которого лежит невыполненный сценарий.
+		"""
+		macro_mod = _bu_mcp('macro')
+		name = self._macro_name(args.get('name'))
+		path = self._macro_path(name)
+		if not path.exists():
+			raise ToolError(f'No macro named {name!r} in {self._macro_dir()}. Call macro_list to see what is saved.')
+		try:
+			macro = json.loads(path.read_text(encoding='utf-8'))
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'Macro {name!r} at {path} is not readable JSON: {type(exc).__name__}: {exc}') from exc
+
+		strict = True if args.get('strict') is None else bool(args.get('strict'))
+		variables = args.get('vars') or {}
+		if not isinstance(variables, dict):
+			raise ToolError(f'`vars` must be an object, got {type(variables).__name__}.')
+
+		session, _ = await self._ensure_session()
+		await self._check_domain_gate('macro_run')
+		self._macro_domain_gate(macro)
+
+		try:
+			out = await macro_mod.run(session, macro, vars=variables, strict=strict)
+		except ToolError:
+			raise
+		except Exception as exc:  # noqa: BLE001
+			raise ToolError(f'Macro {name!r} FAILED: {type(exc).__name__}: {exc}. Nothing beyond the failing step ran.') from exc
+
+		if not isinstance(out, dict):
+			raise ToolError(f'macro.run returned {type(out).__name__}, expected the contract dict with `ok`/`steps`.')
+
+		payload: dict[str, Any] = {'name': name, 'strict': strict, 'file': str(path), **out}
+		if not out.get('ok'):
+			payload['action'] = f'Macro {name!r} FAILED at step {out.get("failed_at")}.'
+			raise ToolError(
+				f'Macro {name!r} FAILED at step {out.get("failed_at")} (strict={strict}). The remaining '
+				f'steps did not run in strict mode. Full report: {self._json(payload, compact=True)}'
+			)
+		payload['action'] = f'Macro {name!r} replayed {len(out.get("steps") or [])} step(s), all verified.'
+		return self._text(payload, compact=True)
 
 	@staticmethod
 	def _downscale_png(raw: bytes, max_dim: int) -> tuple[bytes, dict[str, Any]]:
@@ -2056,9 +2682,20 @@ class BuMcpServer:
 				# добавлена только расписка о последствиях (delta).
 				'select_dropdown': lambda a: self._tool_registry_with_delta('select_dropdown', a),
 				'send_keys': lambda a: self._tool_registry_with_delta('send_keys', a),
+				# Журнал и макросы: браузер трогает только macro_run, остальные три
+				# работают с файлами и отвечают даже при мёртвом Chrome.
+				'journal_list': self._tool_journal_list,
+				'macro_save': self._tool_macro_save,
+				'macro_list': self._tool_macro_list,
+				'macro_run': self._tool_macro_run,
 			}
 			if name in overrides:
-				return await overrides[name](args)
+				run = overrides[name]
+				# Действия, меняющие состояние, идут через журнал: он пишет любой
+				# исход, включая отказ, и никогда не мешает самому действию.
+				if name in JOURNALED_TOOLS:
+					return await self._journaled(name, args, run)
+				return await run(args)
 
 			tools = self._registry_tools()
 			if name in BRIDGE_EXCLUDE or name not in tools.registry.registry.actions:
@@ -2094,6 +2731,11 @@ class BuMcpServer:
 			'Every state-changing action returns a `delta` key: what measurably changed on the page. '
 			'`delta.no_effect` means the action reported success but nothing changed — treat that step '
 			'as NOT done and check browser_state before continuing.\n\n'
+			'Every state-changing action is also written to a journal with the element handle it used. '
+			'To repeat a sequence without a model in the loop: journal_list to see what was recorded, '
+			'macro_save to turn those entries into a macro, macro_run to replay it. Replay re-identifies '
+			'elements from their handles, so it survives a reload that invalidates every index; a step '
+			'that cannot be reproduced fails the call.\n\n'
 			'Domain policy: a single allowlist from BU_MCP_ALLOWED_DOMAINS (comma separated, empty '
 			'means unrestricted). There is no deny list, so there is no allow-vs-deny precedence to '
 			'reason about: what is not listed is blocked.'

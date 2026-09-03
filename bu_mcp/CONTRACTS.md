@@ -103,6 +103,84 @@ arxiv.org, 21 мс на en.wikipedia.org/wiki/Main_Page (844 интеракти�
 167–208 символов, когда дельта непустая, и 455 символов вместе с `note`, когда сработал
 `no_effect`. Для сравнения: один `browser_state` на той же википедии — 40 307 символов.
 
+### Профиль браузера: headless и вьюпорт
+
+`BrowserProfile` строится в `BuMcpServer._profile()` с ЯВНЫМ `headless`
+(`BU_MCP_HEADLESS`, по умолчанию `1`, значения `0/false/no/off` дают окно).
+
+Важно, чем это НЕ является. Мы всегда подключаемся к уже работающему Chrome по
+`cdp_url`, а на этом пути `headless` не влияет ни на что: режим окна определился
+при запуске браузера, и `on_BrowserStartEvent` до ветки запуска не доходит вовсе
+(`if not self.cdp_url`). Считать это защитой от выскакивающего окна нельзя.
+Значение имеет ровно один путь — если `BU_MCP_CDP_URL` пуст и browser-use
+поднимает браузер сам: там без явного флага `headless` остаётся `None`, и
+`detect_display_configuration` выводит его из наличия дисплея (на машине с
+экраном — окно). `~/.config/browseruse/config.json` наш путь не читает вообще:
+`BrowserProfile` конструируется напрямую, а `load_browser_use_config` живёт в
+CLI и штатном MCP-сервере.
+
+Побочка, которую пришлось снимать. `headless=True` в валидаторе тянет
+`viewport = screen`, `no_viewport = False`, а с ними browser-use шлёт
+`Emulation.setDeviceMetricsOverride` на каждую вкладку, которую создаёт ИЛИ на
+которую переводит фокус (`on_TabCreatedEvent` / `on_AgentFocusChangedEvent`) —
+включая ЧУЖУЮ, на которую он переключается сам, когда наша отсоединяется.
+Поэтому при подключении (`cdp_url` задан) геометрия возвращается к
+`viewport=None`, `no_viewport=True`: чужой вьюпорт мы не трогаем. Для ветки
+запуска viewport остаётся штатным.
+
+### Журнал действий и макросы (JOURNAL_CONTRACT.md)
+
+Каждое действие, МЕНЯЮЩЕЕ состояние, пишется в журнал: `browser_click`,
+`browser_type`, `browser_hover`, `browser_navigate`, `select_dropdown`,
+`send_keys`, `scroll` (константа `JOURNALED_TOOLS`). Наблюдения не пишутся —
+их всё равно выкидывает `to_macro`.
+
+Запись (`journal.record`) идёт в `finally`, поэтому фиксируется ЛЮБОЙ исход,
+включая отказ и отмену. Поля — `JOURNAL_FIELDS`: `ts`, `tool`, `params`,
+`handle`, `url_before`, `url_after`, `delta`, `outcome`, `error`; плюс наши
+`cost_ms`, `resolved_index`, `handle_error`. `outcome` ∈ `ok | noop | error`;
+`noop` ставится и на `NOOP_MARKERS`, и на `delta.no_effect`.
+
+Журнал — наблюдатель, а не участник: отсутствующий модуль и упавший
+`journal.record` гасятся в лог и НЕ ломают действие (проверено тестом).
+
+Цена. `handle` — полный `resolve.describe_handle` по УЖЕ разрешённому индексу,
+снятый ДО действия; `url_before` берётся из уже снятой пробы дельты (для
+`browser_navigate` — из `navigation_baseline`, для `scroll` — из
+`get_current_page_url`, который читается из session_manager, медиана 0.000 мс).
+Замерено на headless Chrome 2026-09-03: `describe_handle` 0.78 / 0.94 / 2.94 мс
+(min/med/max), дозапись строки JSONL 0.040 / 0.063 / 0.395 мс, запись целиком
+~587 байт. Сквозным прогоном: медиана `cost_ms` 0.90 мс против медианы
+`delta.cost_ms` 1.80 мс на тех же вызовах — журнал дешевле дельты, к которой
+пристёгнут.
+
+`journal_list` -> компактный JSON:
+`{'action', 'path', 'total', 'returned', 'entries': [...]}`.
+У каждой записи есть АБСОЛЮТНАЯ позиция `i` — её и принимает
+`macro_save(include=[...])`. По умолчанию строки — выжимка
+(`ts`, `tool`, `params`, `outcome`, `url`, короткий `handle`, `delta.status`,
+`cost_ms`); `full=true` отдаёт записи дословно.
+
+`macro_save` -> `{'action', 'name', 'file', 'steps' (int), 'tools': [...], 'vars': {...}}`.
+Схлопывает выбранные записи через `journal.to_macro` и кладёт файл через
+`journal.save_macro` (путь считает `journal.home()`, а не сервер). Имя
+проверяется белым списком `MACRO_NAME_RE` — не подошло, значит `ToolError`, а
+не тихая замена символов: имя едет в путь файла. Макрос без шагов — тоже
+`ToolError`, а не пустой успех.
+
+`macro_list` -> без имени `{'action', 'dir', 'macros': [{'name','file','steps','tools','vars'}]}`;
+с именем — `{'action', 'name', 'file', 'macro': {...}}` целиком.
+
+`macro_run` -> `{'action', 'name', 'strict', 'file', ...выхлоп macro.run}`
+(`ok`, `steps`, `failed_at`, `vars`, `discrepancies`, ...).
+`strict` по умолчанию `true`. **`ok == False` — это `ToolError` в ОБОИХ режимах**:
+`strict` решает только, останавливаться ли на первом расхождении или дойти до
+конца, собрав их все, и НЕ влияет на видимость провала. Полный отчёт едет
+внутри текста ошибки. Перед первым шагом макрос дополнительно гейтится по
+allowlist по всем URL, зашитым в его шаги (`_macro_urls`): шаги исполняет
+`macro.py` напрямую, мимо `_check_domain_gate`, и без этой проверки сохранённый
+`navigate` был бы дырой в доменной политике.
+
 ## bu_mcp/resolve.py
     class StaleHandleError(Exception): ...
     async def resolve_index(session, index: int)
