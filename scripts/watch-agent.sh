@@ -1,7 +1,7 @@
 #!/bin/zsh
 # Живой лог действий браузерного агента: какой инструмент, куда кликает, что вводит.
 # Берёт самый свежий непустой транскрипт сабагента текущего проекта и следит за ним.
-# Использование: ~/bu-lab/watch-agent.sh [каталог проекта в /private/tmp/claude-501]
+# Использование: scripts/watch-agent.sh [каталог проекта в /private/tmp/claude-501]
 DIR="${1:-/private/tmp/claude-501/$(pwd | tr "/." "--")}"
 F=$(ls -t "$DIR"/*/tasks/*.output 2>/dev/null | while read f; do [[ -s "$f" ]] && { echo "$f"; break; }; done)
 [[ -z "$F" ]] && { echo "транскриптов нет"; exit 1; }
