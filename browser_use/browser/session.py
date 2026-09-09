@@ -1,8 +1,11 @@
 """Event-driven browser session with backwards compatibility."""
 
 import asyncio
+import contextlib
 import logging
+import os
 import re
+import sys
 import time
 from functools import cached_property
 from pathlib import Path
@@ -68,6 +71,171 @@ DEFAULT_BROWSER_PROFILE = BrowserProfile()
 _LOGGED_UNIQUE_SESSION_IDS = set()  # track unique session IDs that have been logged to make sure we always assign a unique enough id to new sessions and avoid ambiguity in logs
 red = '\033[91m'
 reset = '\033[0m'
+
+
+def _activation_allowed() -> bool:
+	"""Можно ли выносить вкладку/окно вперёд средствами Chrome.
+
+	`Target.activateTarget` — чисто косметика: она показывает вкладку в UI.
+	В нашей схеме окно браузера автоматизации живёт за пределами экранов, так
+	что показывать нечего, а побочка есть: macOS выносит приложение вперёд, и у
+	того, кто в этот момент работает за машиной, уезжает фокус — тот самый
+	альт-таб посреди работы. Поэтому по умолчанию активация выключена.
+
+	`BU_ALLOW_ACTIVATE=1` возвращает прежнее поведение, если браузер на экране
+	и переключение вкладок хочется видеть.
+	"""
+	import os
+
+	return os.getenv('BU_ALLOW_ACTIVATE', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+def create_target_params(params):
+	"""Дописать `background=True` в параметры `Target.createTarget`.
+
+	Это и есть настоящая защита от альт-табов: Chrome с этим флагом создаёт
+	вкладку, не вынося приложение вперёд. Проверено замером — см.
+	`preserve_frontmost`. Флаг chrome-only и по умолчанию `false`, поэтому
+	апстрим его не ставит.
+
+	`newWindow` не трогаем: новое ОКНО Chrome показывает в любом случае, и там
+	работает только `preserve_frontmost`.
+	"""
+	if _activation_allowed():
+		return params
+	updated = dict(params or {})
+	# Именно присваивание, а не setdefault. Апстрим передаёт `background: False`
+	# ЯВНО, и setdefault такое значение не трогает — флаг тихо оставался
+	# выключенным, а вкладка продолжала забирать фокус. Ошибка стоила целого
+	# круга замеров: открытие вкладки крало фокус, закрытие нет.
+	updated['background'] = True
+	return updated
+
+
+_AUTOMATION_PID: str | None = None
+
+
+async def _automation_chrome_pid() -> str:
+	"""PID Chrome, к которому мы подключены, — по порту из ``BU_MCP_CDP_URL``.
+
+	Нужен, чтобы отличить НАШ браузер от основного браузера владельца: оба
+	называются «Google Chrome», и различить их по имени нельзя. Определяется
+	один раз и запоминается — порт за время работы не меняется.
+
+	Пусто, если браузер не локальный (например, проброшен по ssh): тогда
+	трогать чей-либо фокус мы права не имеем и предохранитель просто молчит.
+	"""
+	global _AUTOMATION_PID
+	if _AUTOMATION_PID is not None:
+		return _AUTOMATION_PID
+
+	port = '9222'
+	try:
+		from urllib.parse import urlparse
+
+		port = str(urlparse(os.getenv('BU_MCP_CDP_URL', 'http://127.0.0.1:9222')).port or 9222)
+	except Exception:  # noqa: BLE001
+		pass
+	try:
+		proc = await asyncio.create_subprocess_exec(
+			'lsof', '-ti', f'tcp:{port}', '-sTCP:LISTEN',
+			stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+		)
+		out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+		_AUTOMATION_PID = out.decode().split('\n')[0].strip()
+	except Exception:  # noqa: BLE001
+		_AUTOMATION_PID = ''
+	return _AUTOMATION_PID
+
+
+@contextlib.asynccontextmanager
+async def preserve_frontmost():
+	"""Страховка на случай, если фокус всё же уехал.
+
+	Основное средство — не эта обёртка, а `background=True` в параметрах
+	`Target.createTarget` (см. `create_target_params`): с ним фокус не уводится
+	вообще, ни при открытии вкладки, ни при её закрытии. Обёртка нужна для
+	путей, где флаг не действует, — например при создании нового ОКНА.
+
+	Замеры, из-за которых всё это здесь:
+
+	* навигация в уже открытой вкладке — 0 краж фокуса из 50;
+	* `createTarget` без `background` — крадёт каждый раз, и закрытие такой
+	  вкладки тоже;
+	* `createTarget` с `background=True` — не крадёт ни при открытии, ни при
+	  закрытии;
+	* `closeTarget` крадёт, когда закрывают АКТИВНУЮ вкладку: Chrome
+	  переключается на соседнюю и поднимает окно. Замерено 3 кражи на 60 при
+	  закрытии вкладок, оставшихся активными. Поэтому закрытие обёрнуто.
+
+	Настройками запуска это не обходится: скрытое приложение создание вкладки
+	само же и раскрывает, а окно за пределами экрана Chrome на macOS прижимает
+	обратно, так что `--window-position` тоже не решение.
+
+	`BU_ALLOW_ACTIVATE=1` выключает и флаг, и обёртку — для случая, когда
+	браузер стоит на экране и его всплытие как раз и нужно видеть.
+	"""
+	if sys.platform != 'darwin' or _activation_allowed():
+		yield
+		return
+
+	async def osa(script: str) -> str:
+		try:
+			proc = await asyncio.create_subprocess_exec(
+				'osascript', '-e', script, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL
+			)
+			out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
+			return out.decode().strip()
+		except Exception:  # noqa: BLE001
+			return ''
+
+	ours = await _automation_chrome_pid()
+	if not ours:
+		# Не знаем, какой Chrome наш, — значит не имеем права никого трогать.
+		yield
+		return
+
+	front = 'tell application "System Events" to unix id of first process whose frontmost is true'
+	was = await osa(front)
+	try:
+		yield
+	finally:
+		if was.isdigit():
+			# Один вызов osascript, а не три: пока мы спрашиваем «кто впереди»,
+			# «как его зовут» и только потом возвращаем фокус, чужое окно уже
+			# видно на экране. Каждый лишний спавн — лишние ~150 мс мигания,
+			# поэтому решение принимается внутри самого AppleScript.
+			#
+			# Возвращаем, только если фокус перехватил именно Chrome: если
+			# владелец за это время сам ушёл в другое приложение, тащить его
+			# обратно нельзя — это был бы тот же альт-таб, только наоборот.
+			# Сравниваем по PID, а не по имени. «Google Chrome» называется и
+			# ОСНОВНОЙ браузер владельца: по имени мы уводили фокус из его
+			# собственного окна — то есть чинили альт-табы, устраивая альт-таб.
+			# Трогаем только тот процесс, к которому сами подключены по CDP.
+			#
+			# Две ветки, и различие между ними не косметическое.
+			#
+			# Если наш Chrome ВПЕРЕДИ — только возвращаем фокус, не прячем.
+			# Скрытие фронтового приложения само переназначает активное окно:
+			# macOS поднимает следующее, и оно почти никогда не то, из которого
+			# фокус увели. Замерено — «вернуть фокус, затем спрятать» оставляло
+			# фокус на Finder.
+			#
+			# Если он НЕ впереди — наоборот, прячем: окно иначе так и висит на
+			# экране после работы. Скрытие фонового приложения фокус не трогает,
+			# это проверено отдельно.
+			await osa(
+				'tell application "System Events"\n'
+				f'  if unix id of (first process whose frontmost is true) is {ours} then\n'
+				f'    set frontmost of (first process whose unix id is {was}) to true\n'
+				'  else\n'
+				f'    set visible of (first process whose unix id is {ours}) to false\n'
+				'  end if\n'
+				'end tell'
+			)
+
+
 
 
 class Target(BaseModel):
@@ -1145,7 +1313,8 @@ class BrowserSession(BaseModel):
 			else:
 				# No pages open at all, create a new one (handles switching to it automatically)
 				assert self._cdp_client_root is not None, 'CDP client root not initialized - browser may not be connected yet'
-				new_target = await self._cdp_client_root.send.Target.createTarget(params={'url': 'about:blank'})
+				async with preserve_frontmost():
+					new_target = await self._cdp_client_root.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
 				target_id = new_target['targetId']
 				# Don't await, these may circularly trigger SwitchTabEvent and could deadlock, dispatch to enqueue and return
 				self.event_bus.dispatch(TabCreatedEvent(url='about:blank', target_id=target_id))
@@ -1157,10 +1326,11 @@ class BrowserSession(BaseModel):
 		# Ensure session exists and update agent focus (only for page/tab targets)
 		cdp_session = await self.get_or_create_cdp_session(target_id=event.target_id, focus=True)
 
-		# Visually switch to the tab in the browser
-		# The Force Background Tab extension prevents Chrome from auto-switching when links create new tabs,
-		# but we still want the agent to be able to explicitly switch tabs when needed
-		await cdp_session.cdp_client.send.Target.activateTarget(params={'targetId': event.target_id})
+		# Visually switch to the tab in the browser.
+		# Отключено по умолчанию: активация вкладки уводит фокус у владельца машины.
+		# См. _activation_allowed().
+		if _activation_allowed():
+			await cdp_session.cdp_client.send.Target.activateTarget(params={'targetId': event.target_id})
 
 		# Get target to access url
 		target = self.session_manager.get_target(event.target_id)
@@ -1183,7 +1353,8 @@ class BrowserSession(BaseModel):
 			# Try to close the target, but don't fail if it's already closed
 			try:
 				cdp_session = await self.get_or_create_cdp_session(target_id=None, focus=False)
-				await cdp_session.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id})
+				async with preserve_frontmost():
+					await cdp_session.cdp_client.send.Target.closeTarget(params={'targetId': event.target_id})
 			except Exception as e:
 				self.logger.debug(f'Target may already be closed: {e}')
 		except Exception as e:
@@ -1340,7 +1511,8 @@ class BrowserSession(BaseModel):
 		from cdp_use.cdp.target.commands import CreateTargetParameters
 
 		params: CreateTargetParameters = {'url': url or 'about:blank'}
-		result = await self.cdp_client.send.Target.createTarget(params)
+		async with preserve_frontmost():
+			result = await self.cdp_client.send.Target.createTarget(create_target_params(params))
 
 		target_id = result['targetId']
 
@@ -1414,7 +1586,8 @@ class BrowserSession(BaseModel):
 			target_id = str(page)
 
 		params: CloseTargetParameters = {'targetId': target_id}
-		await self.cdp_client.send.Target.closeTarget(params)
+		async with preserve_frontmost():
+			await self.cdp_client.send.Target.closeTarget(params)
 
 	async def cookies(self) -> list['Cookie']:
 		"""Get cookies, optionally filtered by URLs."""
@@ -1946,7 +2119,8 @@ class BrowserSession(BaseModel):
 
 			# Ensure we have at least one page
 			if not page_targets_from_manager:
-				new_target = await self._cdp_client_root.send.Target.createTarget(params={'url': 'about:blank'})
+				async with preserve_frontmost():
+					new_target = await self._cdp_client_root.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
 				target_id = new_target['targetId']
 				self.logger.debug(f'📄 Created new blank page: {target_id}')
 			else:
@@ -2227,7 +2401,8 @@ class BrowserSession(BaseModel):
 				self.logger.debug(f'🔄 Agent focus set to fallback target {fallback_id[:8]}...')
 			else:
 				# No pages exist — create one
-				new_target = await self._cdp_client_root.send.Target.createTarget(params={'url': 'about:blank'})
+				async with preserve_frontmost():
+					new_target = await self._cdp_client_root.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
 				target_id = new_target['targetId']
 				await self.get_or_create_cdp_session(target_id, focus=True)
 				self.logger.debug(f'🔄 Created new blank page during reconnect: {target_id[:8]}...')
@@ -3463,15 +3638,18 @@ class BrowserSession(BaseModel):
 			params['newWindow'] = True
 		# Use the root CDP client to create tabs at the browser level
 		if self._cdp_client_root:
-			result = await self._cdp_client_root.send.Target.createTarget(params=params)
+			async with preserve_frontmost():
+				result = await self._cdp_client_root.send.Target.createTarget(params=create_target_params(params))
 		else:
 			# Fallback to using cdp_client if root is not available
-			result = await self.cdp_client.send.Target.createTarget(params=params)
+			async with preserve_frontmost():
+				result = await self.cdp_client.send.Target.createTarget(params=create_target_params(params))
 		return result['targetId']
 
 	async def _cdp_close_page(self, target_id: TargetID) -> None:
 		"""Close a page/tab using CDP Target.closeTarget."""
-		await self.cdp_client.send.Target.closeTarget(params={'targetId': target_id})
+		async with preserve_frontmost():
+			await self.cdp_client.send.Target.closeTarget(params={'targetId': target_id})
 
 	async def _cdp_get_cookies(self) -> list[Cookie]:
 		"""Get cookies using CDP Network.getCookies."""

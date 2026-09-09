@@ -12,8 +12,7 @@ from cdp_use.cdp.target import AttachedToTargetEvent, DetachedFromTargetEvent, S
 
 from browser_use.utils import create_task_with_error_handling
 
-if TYPE_CHECKING:
-	from browser_use.browser.session import BrowserSession, CDPSession, Target
+from browser_use.browser.session import BrowserSession, CDPSession, Target, _activation_allowed
 
 
 class SessionManager:
@@ -722,7 +721,7 @@ class SessionManager:
 				self.logger.info(f'[SessionManager] ✅ Agent focus recovered: {new_target_id[:8]}...')
 
 				# Visually activate the tab in browser (only for existing tabs)
-				if is_existing_tab:
+				if is_existing_tab and _activation_allowed():
 					try:
 						assert self.browser_session._cdp_client_root is not None
 						await self.browser_session._cdp_client_root.send.Target.activateTarget(params={'targetId': new_target_id})
