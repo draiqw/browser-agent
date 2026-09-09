@@ -938,9 +938,53 @@ class BuMcpServer:
 				logger.warning('cannot drop the viewport override for a browser we did not launch: %r', exc)
 		return profile
 
+	async def _session_alive(self) -> bool:
+		"""Жива ли кэшированная сессия.
+
+		Проба — настоящий круговой запрос по CDP. Спрашивать
+		``get_current_page_url()`` бесполезно: он глотает ошибку и на мёртвом
+		сокете возвращает ``about:blank``, то есть выглядит как успех. На том же
+		месте ``Target.getTargets`` честно бросает ``Client is not started``.
+
+		Штатная реконнект-логика browser-use здесь тоже не спасает: она стучится
+		в прежний ``ws://.../devtools/browser/<uuid>``, а у перезапущенного
+		Chrome uuid другой, и все три попытки получают HTTP 404.
+		"""
+		if self._session is None:
+			return False
+		try:
+			await self._session.cdp_client.send.Target.getTargets()
+			return True
+		except Exception:  # noqa: BLE001
+			return False
+
+	async def _drop_session(self) -> None:
+		"""Отцепиться от мёртвой сессии, не трогая браузер.
+
+		``keep_alive`` у профиля стоит именно затем, чтобы наш выход не убивал
+		чужой Chrome, так что здесь мы только отпускаем свою сторону.
+		"""
+		session, self._session = self._session, None
+		if session is None:
+			return
+		try:
+			await session.stop()
+		except Exception as exc:  # noqa: BLE001
+			logger.debug('stale session did not close cleanly: %r', exc)
+
 	async def _ensure_session(self) -> tuple[BrowserSession, Tools]:
-		"""Поднять сессию к живому Chrome на первом обращении к браузеру."""
+		"""Поднять сессию к живому Chrome на первом обращении к браузеру.
+
+		Сессия кэшируется, но не навечно. Chrome автоматизации перезапускается
+		штатно — например, `scripts/chrome-automation.sh login` гасит его, чтобы
+		показать окно для ручного логина. Без проверки живости после такого
+		перезапуска все инструменты отвечали бы ошибкой сокета до перезапуска
+		самого MCP-сервера, а клиент видел бы это как «браузер не запущен».
+		"""
 		async with self._session_lock:
+			if self._session is not None and not await self._session_alive():
+				logger.info('bu-mcp session is stale (Chrome restarted?), reattaching')
+				await self._drop_session()
 			if self._session is None:
 				cdp_url = os.getenv('BU_MCP_CDP_URL', 'http://127.0.0.1:9222')
 				profile = self._profile(cdp_url)
