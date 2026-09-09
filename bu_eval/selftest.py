@@ -9,18 +9,30 @@
 
 from __future__ import annotations
 
+import re
+
 from bu_eval.upstream import Check
 
 
-def t_never_headed() -> Check:
-	"""Окна быть не может ни при каком флаге.
+def t_never_steals_focus() -> Check:
+	"""Автоматизация не имеет права забрать фокус у того, кто за машиной.
 
 	Проверка появилась после происшествия: харнесс поднял Chrome с окном, и
-	каждая открытая вкладка забирала фокус у владельца, который в этот момент
-	работал за машиной. Чинится это не аккуратностью, а отсутствием ветки
-	запуска: `bu_eval` умеет только ПОДКЛЮЧАТЬСЯ к уже работающему headless
-	Chrome. Здесь это и проверяется — и по профилю, и по исходникам, чтобы
-	ветка не вернулась случайно.
+	каждая открытая вкладка забирала фокус у владельца. Тогда это чинилось
+	запретом окна вообще. Запрет пришлось снять: headless=new не проходит
+	Cloudflare (на chatgpt.com проверка виснет на "Verifying..." навсегда), а
+	настоящий Chrome с настоящим профилем проходит. Поэтому инвариант теперь
+	формулируется по существу, а не через отсутствие окна:
+
+	* `bu_eval` умеет только ПОДКЛЮЧАТЬСЯ к уже работающему Chrome — ветки
+	  запуска своего браузера здесь нет и не должно появиться;
+	* окно, если оно есть, стартует без активации и сразу прячется, а фокус
+	  после запуска возвращается тому, кто был впереди;
+	* `Target.createTarget` обёрнут в `preserve_frontmost`: это единственный
+	  вызов CDP, после которого macOS выносит Chrome вперёд (0 краж фокуса на
+	  50 навигаций в текущей вкладке против 100% на создании новой);
+	* режим живого процесса СВЕРЯЕТСЯ перед выходом. Через молчаливый выход
+	  «раз 9222 живой, всё хорошо» в прошлый раз и выживал чужой экземпляр.
 	"""
 	from pathlib import Path
 
@@ -28,8 +40,6 @@ def t_never_headed() -> Check:
 
 	p = attached_profile()
 	bad = []
-	if p.headless is not True:
-		bad.append(f'headless={p.headless}')
 	if p.keep_alive is not True:
 		bad.append(f'keep_alive={p.keep_alive} — выход из сессии сбросит чужой Chrome')
 	if p.viewport is not None or p.no_viewport is not True:
@@ -43,42 +53,95 @@ def t_never_headed() -> Check:
 		rel = src.relative_to(root).as_posix()
 		if rel == 'selftest.py':
 			continue
-		if '--headed' in text or 'chrome-automation.sh --headed' in text:
-			bad.append(f'{rel}: вернулся флаг --headed')
 		if 'Browser(' in text or 'headless=headless' in text:
 			bad.append(f'{rel}: вернулась ветка запуска своего браузера')
 
-	# Питон — не единственная дверь. Окно в прошлый раз пришло из шелл-скрипта:
-	# у него был флаг --headed, а при живом 9222 он молча выходил, поэтому
-	# однажды поднятый headed-экземпляр переживал все последующие запуски.
+	guard = root.parent / 'browser_use' / 'browser' / 'session.py'
+	if not guard.exists():
+		bad.append('browser_use/browser/session.py пропал')
+	else:
+		g = guard.read_text(encoding='utf-8')
+		# Флаг должен ПЕРЕЗАПИСЫВАТЬСЯ: апстрим передаёт background=False явно,
+		# и setdefault его не трогал — вкладка продолжала забирать фокус.
+		if "updated['background'] = True" not in g:
+			bad.append('session.py: background не форсируется (setdefault не перебьёт явный False)')
+		if 'async def preserve_frontmost' not in g:
+			bad.append('session.py: предохранитель фокуса пропал')
+		# Свой Chrome от чужого отличается ТОЛЬКО по pid: оба зовутся
+		# «Google Chrome», и разбор по имени однажды уже прятал у владельца
+		# его собственный браузер.
+		if '_automation_chrome_pid' not in g:
+			bad.append('session.py: наш Chrome больше не опознаётся по pid')
+		if 'name of f is "Google Chrome"' in g:
+			bad.append('session.py: вернулось сравнение по имени — заденет чужой Chrome')
+		created = g.count('Target.createTarget(')
+		guarded = g.count('async with preserve_frontmost():')
+		if guarded < created:
+			bad.append(f'session.py: createTarget без предохранителя ({guarded} из {created})')
+
+	# Питон — не единственная дверь. Окно в прошлый раз пришло из шелл-скрипта.
 	launcher = root.parent / 'scripts' / 'chrome-automation.sh'
 	if not launcher.exists():
 		bad.append('scripts/chrome-automation.sh пропал')
 	else:
 		sh = launcher.read_text(encoding='utf-8')
-		if '--headless=new' not in sh:
-			bad.append('chrome-automation.sh: запуск без --headless=new')
-		if 'MODE=' in sh:
-			bad.append('chrome-automation.sh: вернулась переменная режима — раньше через неё и терялся headless')
-		if 'exit 2' not in sh:
-			bad.append('chrome-automation.sh: --headed больше не отбивается')
-		if 'headed_pids' not in sh:
-			bad.append('chrome-automation.sh: нет вытеснения уже работающего headed-экземпляра')
+		if 'hide_app' not in sh:
+			bad.append('chrome-automation.sh: окно больше не прячется после запуска')
+		# Смотрим на КОМАНДЫ, а не на текст: про `open -a` в шапке скрипта
+		# написано специально, и упоминание не должно ронять проверку.
+		code = [ln for ln in sh.splitlines() if not ln.lstrip().startswith('#')]
+		if any(re.search(r'(^|[;&|]\s*)open\s+-', ln) for ln in code):
+			bad.append('chrome-automation.sh: вернулся запуск через `open` — LaunchServices активирует ЧУЖОЙ Chrome')
+		if not any('hide_app' in ln for ln in code):
+			bad.append('chrome-automation.sh: hide_app не вызывается')
+		if 'frontmost_app' not in sh:
+			bad.append('chrome-automation.sh: фокус после запуска не возвращается')
+		# Сторож на время запуска: без него Chrome стоит впереди ~0.6 с, пока
+		# скрипт ждёт готовности CDP. Это была последняя кража фокуса в замерах.
+		if 'Сторож на время запуска' not in sh:
+			bad.append('chrome-automation.sh: пропал сторож фокуса на время запуска')
+		if 'running_mode' not in sh:
+			bad.append('chrome-automation.sh: режим живого процесса не сверяется')
+		if 'уже работает на $PORT' in sh and 'перезапускаю' not in sh:
+			bad.append('chrome-automation.sh: молчаливый выход без перезапуска — так выживал чужой режим')
+		# Окно показывается специально ровно в одном месте — в `login`: там и
+		# только там hide_app вызывается БЕЗ pid'а, куда вернуть фокус.
+		if 'login_back=$(frontmost_app)' not in sh:
+			bad.append('chrome-automation.sh: login не запоминает фокус ДО показа окна')
+		if 'hide_app "$(browser_pids | head -1)" "$login_back"' not in sh:
+			bad.append('chrome-automation.sh: видимый вход (login) потерялся или не прячет окно')
 
 	return Check(
 		'selftest',
-		'браузер всегда без окна',
+		'браузер не забирает фокус',
 		not bad,
-		'; '.join(bad) if bad else f'только подключение к {p.cdp_url}, headless, viewport не трогаем',
+		'; '.join(bad) if bad else f'только подключение к {p.cdp_url}, окно спрятано, фокус возвращается',
 	)
 
 
 def t_model_factory() -> Check:
 	"""Фабрика моделей ставит лимит ответа туда, где он у провайдера называется по-своему,
-	и не подсовывает классу параметров, которых у него нет."""
+	и не подсовывает классу параметров, которых у него нет.
+
+	Настоящий ключ здесь не нужен и не должен быть нужен: selftest по своему
+	контракту не ходит в сеть и не тратит денег, а проверяется тут раскладка
+	параметров по полям класса, то есть чистая конструкция. `make_model` при
+	этом требует ключ просто как гейт, поэтому на время проверки подставляется
+	заглушка — иначе тест падал у всех, у кого рядом нет .env.
+	"""
+	import os
+
 	from bu_eval.models import make_model
 
-	o = make_model('openai:gpt-5-mini', max_output_tokens=32000)
+	placeholder = os.getenv('OPENAI_API_KEY') is None
+	if placeholder:
+		os.environ['OPENAI_API_KEY'] = 'selftest-placeholder-not-a-real-key'
+	try:
+		o = make_model('openai:gpt-5-mini', max_output_tokens=32000)
+	finally:
+		if placeholder:
+			os.environ.pop('OPENAI_API_KEY', None)
+
 	ok_openai = getattr(o, 'max_completion_tokens', None) == 32000 and o.temperature == 0.0
 	lo = make_model('ollama:qwen3:8b', max_output_tokens=32000)  # у ChatOllama нет ни того, ни другого
 	ok_ollama = lo.model == 'qwen3:8b' and not hasattr(lo, 'temperature')
@@ -265,7 +328,7 @@ def t_matrix() -> Check:
 
 
 CHECKS = [
-	t_never_headed,
+	t_never_steals_focus,
 	t_model_factory,
 	t_profiles,
 	t_mcp_profiles,
