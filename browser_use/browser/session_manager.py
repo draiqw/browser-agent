@@ -6,13 +6,12 @@ events, ensuring the session pool always reflects the current browser state.
 
 import asyncio
 from collections import deque
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from cdp_use.cdp.target import AttachedToTargetEvent, DetachedFromTargetEvent, SessionID, TargetID
 
-from browser_use.utils import create_task_with_error_handling
-
 from browser_use.browser.session import BrowserSession, CDPSession, Target, _activation_allowed
+from browser_use.utils import create_task_with_error_handling
 
 
 class SessionManager:

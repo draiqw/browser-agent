@@ -90,7 +90,7 @@ def _activation_allowed() -> bool:
 	return os.getenv('BU_ALLOW_ACTIVATE', '0').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
-def create_target_params(params):
+def create_target_params(params: 'CreateTargetParameters') -> 'CreateTargetParameters':
 	"""Дописать `background=True` в параметры `Target.createTarget`.
 
 	Это и есть настоящая защита от альт-табов: Chrome с этим флагом создаёт
@@ -109,7 +109,7 @@ def create_target_params(params):
 	# выключенным, а вкладка продолжала забирать фокус. Ошибка стоила целого
 	# круга замеров: открытие вкладки крало фокус, закрытие нет.
 	updated['background'] = True
-	return updated
+	return cast('CreateTargetParameters', updated)
 
 
 _AUTOMATION_PID: str | None = None
@@ -134,16 +134,20 @@ async def _automation_chrome_pid() -> str:
 		from urllib.parse import urlparse
 
 		port = str(urlparse(os.getenv('BU_MCP_CDP_URL', 'http://127.0.0.1:9222')).port or 9222)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		pass
 	try:
 		proc = await asyncio.create_subprocess_exec(
-			'lsof', '-ti', f'tcp:{port}', '-sTCP:LISTEN',
-			stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+			'lsof',
+			'-ti',
+			f'tcp:{port}',
+			'-sTCP:LISTEN',
+			stdout=asyncio.subprocess.PIPE,
+			stderr=asyncio.subprocess.DEVNULL,
 		)
 		out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
 		_AUTOMATION_PID = out.decode().split('\n')[0].strip()
-	except Exception:  # noqa: BLE001
+	except Exception:
 		_AUTOMATION_PID = ''
 	return _AUTOMATION_PID
 
@@ -186,7 +190,7 @@ async def preserve_frontmost():
 			)
 			out, _ = await asyncio.wait_for(proc.communicate(), timeout=3)
 			return out.decode().strip()
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return ''
 
 	ours = await _automation_chrome_pid()
@@ -234,8 +238,6 @@ async def preserve_frontmost():
 				'  end if\n'
 				'end tell'
 			)
-
-
 
 
 class Target(BaseModel):
@@ -1314,7 +1316,9 @@ class BrowserSession(BaseModel):
 				# No pages open at all, create a new one (handles switching to it automatically)
 				assert self._cdp_client_root is not None, 'CDP client root not initialized - browser may not be connected yet'
 				async with preserve_frontmost():
-					new_target = await self._cdp_client_root.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
+					new_target = await self._cdp_client_root.send.Target.createTarget(
+						params=create_target_params({'url': 'about:blank'})
+					)
 				target_id = new_target['targetId']
 				# Don't await, these may circularly trigger SwitchTabEvent and could deadlock, dispatch to enqueue and return
 				self.event_bus.dispatch(TabCreatedEvent(url='about:blank', target_id=target_id))
@@ -2120,7 +2124,9 @@ class BrowserSession(BaseModel):
 			# Ensure we have at least one page
 			if not page_targets_from_manager:
 				async with preserve_frontmost():
-					new_target = await self._cdp_client_root.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
+					new_target = await self._cdp_client_root.send.Target.createTarget(
+						params=create_target_params({'url': 'about:blank'})
+					)
 				target_id = new_target['targetId']
 				self.logger.debug(f'📄 Created new blank page: {target_id}')
 			else:
@@ -2402,7 +2408,9 @@ class BrowserSession(BaseModel):
 			else:
 				# No pages exist — create one
 				async with preserve_frontmost():
-					new_target = await self._cdp_client_root.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
+					new_target = await self._cdp_client_root.send.Target.createTarget(
+						params=create_target_params({'url': 'about:blank'})
+					)
 				target_id = new_target['targetId']
 				await self.get_or_create_cdp_session(target_id, focus=True)
 				self.logger.debug(f'🔄 Created new blank page during reconnect: {target_id[:8]}...')

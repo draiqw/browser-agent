@@ -574,7 +574,7 @@ def _bu_mcp(module: str):
 	"""
 	try:
 		return importlib.import_module(f'bu_mcp.{module}')
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		raise ToolError(
 			f'bu_mcp.{module} is unavailable ({type(exc).__name__}: {exc}). '
 			f'This tool is implemented on top of it and cannot run without it.'
@@ -934,7 +934,7 @@ class BuMcpServer:
 			try:
 				profile.viewport = None
 				profile.no_viewport = True
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				logger.warning('cannot drop the viewport override for a browser we did not launch: %r', exc)
 		return profile
 
@@ -955,7 +955,7 @@ class BuMcpServer:
 		try:
 			await self._session.cdp_client.send.Target.getTargets()
 			return True
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return False
 
 	async def _drop_session(self) -> None:
@@ -969,7 +969,7 @@ class BuMcpServer:
 			return
 		try:
 			await session.stop()
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			logger.debug('stale session did not close cleanly: %r', exc)
 
 	async def _ensure_session(self) -> tuple[BrowserSession, Tools]:
@@ -1015,7 +1015,7 @@ class BuMcpServer:
 			return None
 		try:
 			return await self._session.get_current_page_url()
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return None
 
 	# -- список инструментов ------------------------------------------------ #
@@ -1056,7 +1056,7 @@ class BuMcpServer:
 					continue
 			try:
 				schema = action.param_model.model_json_schema()
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				logger.warning('cannot build schema for action %s: %r', name, exc)
 				continue
 			schema.setdefault('type', 'object')
@@ -1155,7 +1155,7 @@ class BuMcpServer:
 			)
 		except ToolError:
 			raise
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'{name} failed: {type(exc).__name__}: {exc}') from exc
 		try:
 			return self._action_result_text(name, result)
@@ -1192,7 +1192,7 @@ class BuMcpServer:
 		"""``True`` / ``False`` / ``None`` (проверить не удалось)."""
 		try:
 			value = await asyncio.wait_for(self._evaluate(session, '1+1'), timeout=3.0)
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return False
 		return True if value == 2 else None
 
@@ -1325,7 +1325,7 @@ class BuMcpServer:
 				browser_session=session,
 				file_system=self._file_system,
 			)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'navigate to {url!r} failed: {type(exc).__name__}: {exc}') from exc
 
 		action_text = self._action_result_text('navigate', result)
@@ -1408,7 +1408,7 @@ class BuMcpServer:
 			) from exc
 		except ToolError:
 			raise
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'Cannot resolve element index [{index}]: {type(exc).__name__}: {exc}') from exc
 
 		live_index = session.get_selector_index(node)
@@ -1417,7 +1417,7 @@ class BuMcpServer:
 			last = resolve_mod.last_resolution(session)
 			if last:
 				info['resolution'] = last
-		except Exception:  # noqa: BLE001
+		except Exception:
 			pass
 		return node, live_index, info
 
@@ -1427,7 +1427,7 @@ class BuMcpServer:
 		"""Один дешёвый снимок признаков страницы. Fail-open: ``{'ok': False}``."""
 		try:
 			value = await asyncio.wait_for(self._evaluate(session, _DELTA_PROBE_JS), timeout=3.0)
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return {'ok': False}
 		if not isinstance(value, dict):
 			return {'ok': False}
@@ -1648,7 +1648,7 @@ class BuMcpServer:
 		try:
 			journal_mod = importlib.import_module('bu_mcp.journal')
 			captured = await journal_mod.capture(session, None if index is None else int(index))
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			# Сюда попадает только отсутствие модуля или мусор в index: сам
 			# capture гасит свои ошибки внутри.
 			captured = {}
@@ -1696,13 +1696,13 @@ class BuMcpServer:
 			entry['outcome'] = cls._journal_outcome(entry)
 		try:
 			journal_mod = importlib.import_module('bu_mcp.journal')
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			logger.warning('bu_mcp.journal is unavailable, %s was not recorded: %r', entry.get('tool'), exc)
 			return
 		entry['cost_ms'] = round(float(entry.get('cost_ms') or 0.0) + (time.perf_counter() - started) * 1000.0, 3)
 		try:
 			journal_mod.record(entry)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			logger.warning('journal.record failed for %s: %r', entry.get('tool'), exc)
 
 	async def _journaled(self, tool: str, args: dict[str, Any], run: Any) -> list[types.ContentBlock]:
@@ -1756,7 +1756,7 @@ class BuMcpServer:
 		"""
 		try:
 			cdp_session = await session.cdp_client_for_node(node)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'hover on [{index}] failed: no CDP session for the element frame ({exc}).') from exc
 		session_id = cdp_session.session_id
 		backend_node_id = node.backend_node_id
@@ -1771,7 +1771,7 @@ class BuMcpServer:
 				params={'backendNodeId': backend_node_id}, session_id=session_id
 			)
 			await asyncio.sleep(0.05)
-		except Exception:  # noqa: BLE001
+		except Exception:
 			scrolled = False
 
 		rect = await session.get_element_coordinates(backend_node_id, cdp_session)
@@ -1787,8 +1787,7 @@ class BuMcpServer:
 		x, y, w, h = float(rect.x), float(rect.y), float(rect.width), float(rect.height)
 		if w <= 0 or h <= 0:
 			raise ToolError(
-				f'Cannot hover [{index}]: the element measures {w:g}x{h:g} px. There is nothing to point at. '
-				f'Nothing was hovered.'
+				f'Cannot hover [{index}]: the element measures {w:g}x{h:g} px. There is nothing to point at. Nothing was hovered.'
 			)
 
 		vx0, vy0 = max(0.0, x), max(0.0, y)
@@ -1850,7 +1849,7 @@ class BuMcpServer:
 				params={'type': 'mouseMoved', 'x': point['x2'], 'y': point['y2'], 'buttons': 0},
 				session_id=session_id,
 			)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'hover on [{live_index}] failed: {type(exc).__name__}: {exc}') from exc
 
 		hit = await self._hover_hit(cdp_session, session_id, geo['backend_node_id'], point)
@@ -1901,7 +1900,7 @@ class BuMcpServer:
 			value = out.get('result', {}).get('value')
 			if isinstance(value, dict):
 				return value
-		except Exception:  # noqa: BLE001
+		except Exception:
 			pass
 		return {'hit': None, 'self': None}
 
@@ -1927,7 +1926,7 @@ class BuMcpServer:
 				browser_session=session,
 				file_system=self._file_system,
 			)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'click on [{live_index}] failed: {type(exc).__name__}: {exc}') from exc
 
 		# Между `_resolve` и `execute_action` узел мог умереть — тогда апстрим
@@ -1967,7 +1966,7 @@ class BuMcpServer:
 		snapshot: dict[str, Any] = {'focus': getattr(session, 'agent_focus_target_id', None), 'ids': []}
 		try:
 			snapshot['ids'] = [t.target_id for t in await session.get_tabs()]
-		except Exception:  # noqa: BLE001
+		except Exception:
 			snapshot['ids'] = []
 		return snapshot
 
@@ -2068,7 +2067,7 @@ class BuMcpServer:
 				browser_session=session,
 				file_system=self._file_system,
 			)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'input into [{live_index}] failed: {type(exc).__name__}: {exc}') from exc
 
 		action_text = self._action_result_text('input', result)
@@ -2091,7 +2090,7 @@ class BuMcpServer:
 		full_page = bool(args.get('full_page', False))
 		try:
 			raw = await session.take_screenshot(full_page=full_page)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'screenshot failed: {type(exc).__name__}: {exc}') from exc
 
 		data, meta = self._downscale_png(raw, max_dim)
@@ -2156,7 +2155,7 @@ class BuMcpServer:
 		probe: dict[str, Any] = {'ok': False}
 		try:
 			page = await asyncio.wait_for(self._evaluate(session, _SCROLL_PROBE_JS), timeout=3.0)
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return probe
 		if not isinstance(page, dict):
 			return probe
@@ -2176,7 +2175,7 @@ class BuMcpServer:
 			value = out.get('result', {}).get('value')
 			if isinstance(value, dict) and value.get('found'):
 				probe['target'] = value
-		except Exception:  # noqa: BLE001
+		except Exception:
 			probe['target'] = None
 		return probe
 
@@ -2228,7 +2227,7 @@ class BuMcpServer:
 		if scroll_target is not None:
 			try:
 				node = await session.get_element_by_index(int(index))
-			except Exception:  # noqa: BLE001
+			except Exception:
 				node = None
 
 		before = await self._scroll_probe(session, node)
@@ -2236,7 +2235,7 @@ class BuMcpServer:
 			result = await tools.registry.execute_action('scroll', args, browser_session=session, file_system=self._file_system)
 		except ToolError:
 			raise
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'scroll failed: {type(exc).__name__}: {exc}') from exc
 		upstream = self._action_result_text('scroll', result)
 
@@ -2384,7 +2383,7 @@ class BuMcpServer:
 			result = await tools.registry.execute_action('switch', args, browser_session=session, file_system=self._file_system)
 		except ToolError:
 			raise
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'switch failed: {type(exc).__name__}: {exc}') from exc
 		upstream = self._action_result_text('switch', result)
 
@@ -2423,7 +2422,7 @@ class BuMcpServer:
 		try:
 			journal_mod = importlib.import_module('bu_mcp.journal')
 			return Path(journal_mod.home()) / 'macros'
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return BU_MCP_HOME / 'macros'
 
 	@staticmethod
@@ -2444,7 +2443,7 @@ class BuMcpServer:
 		try:
 			journal_mod = importlib.import_module('bu_mcp.journal')
 			return Path(journal_mod.macro_path(name))
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return cls._macro_dir() / f'{name}.json'
 
 	@staticmethod
@@ -2467,7 +2466,7 @@ class BuMcpServer:
 			values, _missing = macro_mod._resolve_vars(macro, overrides)
 			if isinstance(values, dict):
 				return values
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			logger.warning('macro._resolve_vars unavailable, the domain gate falls back to a wider check: %r', exc)
 
 		values = {}
@@ -2618,7 +2617,7 @@ class BuMcpServer:
 		path = Path(str(args['path'])).expanduser() if args.get('path') else None
 		try:
 			entries = journal_mod.read(path)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'journal.read({path}) failed: {type(exc).__name__}: {exc}') from exc
 		if not isinstance(entries, list):
 			raise ToolError(f'journal.read returned {type(entries).__name__}, expected a list of entries.')
@@ -2629,7 +2628,7 @@ class BuMcpServer:
 		journal_mod, entries, path = self._journal_entries(args)
 		try:
 			shown_path = str(path or journal_mod.current_path())
-		except Exception:  # noqa: BLE001
+		except Exception:
 			shown_path = str(path or '<unknown>')
 
 		total = len(entries)
@@ -2679,7 +2678,7 @@ class BuMcpServer:
 
 		try:
 			macro = journal_mod.to_macro(picked, name=name)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'journal.to_macro failed: {type(exc).__name__}: {exc}') from exc
 		if not isinstance(macro, dict):
 			raise ToolError(f'journal.to_macro returned {type(macro).__name__}, expected a macro dict.')
@@ -2695,7 +2694,7 @@ class BuMcpServer:
 
 		try:
 			path = Path(journal_mod.save_macro(macro))
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'Cannot write macro {name!r}: {type(exc).__name__}: {exc}') from exc
 
 		return self._text(
@@ -2723,7 +2722,7 @@ class BuMcpServer:
 				raise ToolError(f'No macro named {name!r} in {directory}. Call macro_list without a name to see what is saved.')
 			try:
 				macro = json.loads(path.read_text(encoding='utf-8'))
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				raise ToolError(f'Macro {name!r} at {path} is not readable JSON: {type(exc).__name__}: {exc}') from exc
 			return self._text(
 				{
@@ -2740,7 +2739,7 @@ class BuMcpServer:
 			row: dict[str, Any] = {'name': path.stem, 'file': str(path)}
 			try:
 				macro = json.loads(path.read_text(encoding='utf-8'))
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				row['error'] = f'{type(exc).__name__}: {exc}'
 			else:
 				row['steps'] = len(macro.get('steps') or [])
@@ -2768,7 +2767,7 @@ class BuMcpServer:
 			raise ToolError(f'No macro named {name!r} in {self._macro_dir()}. Call macro_list to see what is saved.')
 		try:
 			macro = json.loads(path.read_text(encoding='utf-8'))
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'Macro {name!r} at {path} is not readable JSON: {type(exc).__name__}: {exc}') from exc
 
 		strict = True if args.get('strict') is None else bool(args.get('strict'))
@@ -2786,7 +2785,7 @@ class BuMcpServer:
 			out = await macro_mod.run(session, macro, vars=variables, strict=strict)
 		except ToolError:
 			raise
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise ToolError(f'Macro {name!r} FAILED: {type(exc).__name__}: {exc}. Nothing beyond the failing step ran.') from exc
 
 		if not isinstance(out, dict):
@@ -2806,7 +2805,7 @@ class BuMcpServer:
 	def _downscale_png(raw: bytes, max_dim: int) -> tuple[bytes, dict[str, Any]]:
 		try:
 			from PIL import Image
-		except Exception:  # noqa: BLE001
+		except Exception:
 			return raw, {'size_bytes': len(raw), 'downscaled': False, 'note': 'Pillow unavailable, image returned as captured'}
 
 		with Image.open(io.BytesIO(raw)) as img:
@@ -2896,7 +2895,7 @@ class BuMcpServer:
 			try:
 				# stop(), не kill(): Chrome не наш, мы к нему только подключились.
 				await self._session.stop()
-			except Exception:  # noqa: BLE001
+			except Exception:
 				pass
 			self._session = None
 

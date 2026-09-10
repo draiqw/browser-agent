@@ -347,6 +347,6 @@ def run_all() -> list[Check]:
 	for fn in CHECKS:
 		try:
 			out.append(fn())
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			out.append(Check('selftest', fn.__name__, False, f'упало: {exc!r}'))
 	return out

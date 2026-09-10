@@ -41,6 +41,7 @@ CDP_URL = os.getenv('BU_MCP_CDP_URL', 'http://127.0.0.1:9222')
 
 # -- шифрование файла --------------------------------------------------- #
 
+
 def _key(passphrase: str, salt: bytes) -> bytes:
 	import hashlib
 
@@ -74,6 +75,7 @@ def unseal(raw: bytes, passphrase: str) -> bytes:
 
 # -- разговор с браузером ------------------------------------------------ #
 
+
 class CDP:
 	"""Минимальный клиент CDP поверх websockets: нам хватает нескольких команд."""
 
@@ -85,13 +87,14 @@ class CDP:
 	async def connect(cls) -> Any:
 		import websockets
 
+		def _version() -> dict:
+			return json.load(urllib.request.urlopen(f'{CDP_URL}/json/version', timeout=5))
+
 		try:
-			ver = json.load(urllib.request.urlopen(f'{CDP_URL}/json/version', timeout=5))
+			# urllib блокирующий; в async-функции его положено уводить в поток (ASYNC210).
+			ver = await asyncio.to_thread(_version)
 		except Exception as exc:
-			raise SystemExit(
-				f'Chrome не отвечает на {CDP_URL}: {exc}\n'
-				'Подними его: scripts/chrome-automation.sh'
-			) from None
+			raise SystemExit(f'Chrome не отвечает на {CDP_URL}: {exc}\nПодними его: scripts/chrome-automation.sh') from None
 		return await websockets.connect(ver['webSocketDebuggerUrl'], max_size=None)
 
 	async def send(self, method: str, params: dict | None = None) -> dict:
@@ -156,7 +159,7 @@ async def _origin_storage(cdp: CDP, origins: list[str]) -> dict[str, dict[str, s
 				parsed = json.loads(val)
 				if parsed:
 					out[origin] = parsed
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			print(f'  localStorage {origin}: пропущен ({exc})', file=sys.stderr)
 		finally:
 			await cdp.send('Target.closeTarget', {'targetId': tid})
@@ -173,8 +176,10 @@ async def do_export(domains: list[str], with_storage: bool) -> dict:
 		if with_storage and domains:
 			origins = [f'https://{d}' for d in domains]
 			bundle['localStorage'] = await _origin_storage(cdp, origins)
-			print(f'localStorage: {sum(len(v) for v in bundle["localStorage"].values())} ключей '
-			      f'на {len(bundle["localStorage"])} origin(ах)')
+			print(
+				f'localStorage: {sum(len(v) for v in bundle["localStorage"].values())} ключей '
+				f'на {len(bundle["localStorage"])} origin(ах)'
+			)
 		return bundle
 
 
