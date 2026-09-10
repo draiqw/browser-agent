@@ -39,3 +39,22 @@ accessible name, и `describe_handle` возвращает составной х
 `strict=False` — продолжать, копя список расхождений.
 
 Возврат: `{'ok': bool, 'steps': [...], 'failed_at': int | None, 'vars': {...}}`.
+
+## Обучение -> скрипт
+
+    journal.mark(event: 'start'|'stop', name) -> dict      # закладка в журнале
+    journal.recording() -> dict | None                      # открытая запись
+    journal.span(entries, name=None) -> (positions, info)   # отрезок между закладками
+    journal.merge_macro(base, patch, *, at) -> dict         # починка: шаги 1..at-1 из base
+    macro.checkpoint(session, params, *, timeout=None) -> dict   # ждёт условие, StepFailed
+    macro.run(..., from_step=1, auto_start=True)
+
+Запись `tool: 'macro_mark'` — закладка, в макрос не попадает. Запись
+`tool: 'checkpoint'` (`params`: `text` / `not_text` / `url` / `timeout` / `note`) —
+единственное наблюдение, которое журналируется: при повторе это шаг-проверка,
+и `timeout` у него остаётся в макросе как часть смысла шага.
+
+MCP: `macro_record(action=start|stop|status, name, save, replace_from)`,
+`checkpoint(text, not_text, url, timeout, note)`, `macro_save(..., replace_from)`,
+`macro_run(..., from_step, new_tab)`. CLI без сервера и модели:
+`python -m bu_mcp.macro run NAME [--var k=v] [--from N] [--no-strict] [--json]`.

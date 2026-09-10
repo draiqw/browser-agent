@@ -539,6 +539,9 @@ JOURNALED_TOOLS = frozenset(
 		'select_dropdown',
 		'send_keys',
 		'scroll',
+		# Единственное наблюдение в журнале: это не разведка, а заявленное
+		# агентом условие, которое при повторе становится шагом-проверкой.
+		'checkpoint',
 	}
 )
 
@@ -691,6 +694,59 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 			},
 		},
 	},
+	'macro_record': {
+		'type': 'object',
+		'properties': {
+			'action': {
+				'type': 'string',
+				'enum': ['start', 'stop', 'status'],
+				'description': (
+					'start: put a bookmark in the journal — everything you do from now on belongs to the macro. '
+					'stop: close the bookmark and (by default) save the macro. status: is a recording open, and since when.'
+				),
+			},
+			'name': {
+				'type': 'string',
+				'description': 'Macro name for start (required) and stop (defaults to the open recording). [A-Za-z0-9._-] only.',
+			},
+			'save': {
+				'type': 'boolean',
+				'default': True,
+				'description': 'On stop: build and save the macro right away. false only closes the bookmark.',
+			},
+			'replace_from': {
+				'type': 'integer',
+				'minimum': 1,
+				'description': (
+					'On stop, when repairing: keep steps 1..N-1 of the already saved macro with this name and '
+					'replace everything from step N with what was just recorded.'
+				),
+			},
+		},
+		'required': ['action'],
+	},
+	'checkpoint': {
+		'type': 'object',
+		'properties': {
+			'text': {
+				'type': 'string',
+				'description': 'This text must be on the page (case-insensitive, whitespace-insensitive).',
+			},
+			'not_text': {'type': 'string', 'description': 'This text must NOT be on the page.'},
+			'url': {'type': 'string', 'description': 'The page URL must contain this substring.'},
+			'timeout': {
+				'type': 'number',
+				'default': 20,
+				'minimum': 0,
+				'maximum': 600,
+				'description': (
+					'How long to wait for the condition, seconds. Part of the step: a replay waits the same. '
+					'Use a generous value after actions whose result arrives asynchronously (a model reply, a search).'
+				),
+			},
+			'note': {'type': 'string', 'description': 'Why this check matters; shown when it fails.'},
+		},
+	},
 	'macro_save': {
 		'type': 'object',
 		'properties': {
@@ -702,9 +758,19 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 			},
 			'limit': {
 				'type': 'integer',
-				'default': 20,
 				'minimum': 1,
-				'description': 'Without `include`: use the last N journal entries.',
+				'description': (
+					'Without `include`: use the last N journal entries. Without both, the entries of the open or '
+					'most recent macro_record recording are used, or the last 20 if there was no recording.'
+				),
+			},
+			'replace_from': {
+				'type': 'integer',
+				'minimum': 1,
+				'description': (
+					'Repair mode: keep steps 1..N-1 of the macro already saved under this name and replace '
+					'everything from step N with the selected journal entries.'
+				),
 			},
 			'path': {'type': 'string', 'description': 'Journal file to build from. Defaults to the current session.'},
 		},
@@ -731,6 +797,17 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 					'Stop at the first step whose effect does not match what was recorded. false runs to the '
 					'end and collects every mismatch. Either way a failed run is an ERROR, not a report.'
 				),
+			},
+			'from_step': {
+				'type': 'integer',
+				'default': 1,
+				'minimum': 1,
+				'description': 'Start at this step. For repairs: the page is already in the state steps 1..N-1 produce.',
+			},
+			'new_tab': {
+				'type': 'boolean',
+				'default': False,
+				'description': 'Run in a fresh background tab instead of the current one. The tab stays open afterwards.',
 			},
 		},
 		'required': ['name'],
@@ -773,18 +850,37 @@ _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 		'with the element handle it acted on, the URL before and after, the delta receipt and the outcome '
 		'(ok / noop / error). Each row carries an absolute position `i` — feed those to macro_save.'
 	),
+	'macro_record': (
+		'Teach-then-replay bookkeeping. Call with action=start and a name BEFORE working through a scenario with '
+		'the user; do the task normally (clicks, typing, checkpoints — mistakes and retries are fine, they are '
+		'collapsed away); then action=stop saves the macro from exactly that stretch of the journal, so nobody has '
+		'to count journal positions. To repair a macro that failed at step N: macro_record start with the same '
+		'name, redo the work from step N on, then stop with replace_from=N.'
+	),
+	'checkpoint': (
+		'Assert something about the page and wait for it: `text` is present, `not_text` is absent, `url` contains '
+		'a substring. Polls until the condition holds or `timeout` runs out, then FAILS loudly. Use it after any '
+		'action whose result arrives later (a reply being generated, a search, a redirect). It is journalled and '
+		'becomes a validation step of the macro: on replay the same check runs with the same timeout, and a '
+		'replay that does not reach the expected state stops there instead of clicking on.'
+	),
 	'macro_save': (
 		'Collapse journal entries into a replayable macro and store it on disk. Observations are dropped, '
-		'state-changing steps are kept together with the element handle that identifies each target, and '
-		'typed text becomes a named variable you can override at run time. The macro survives a page '
-		'reload because it replays handles, not indices.'
+		'state-changing steps are kept together with the element handle that identifies each target, '
+		'checkpoints are kept as validation steps, and typed text becomes a named variable you can override '
+		'at run time. The macro survives a page reload because it replays handles, not indices. Prefer '
+		'macro_record start/stop; call this directly only to pick journal entries by hand.'
 	),
 	'macro_list': ('Saved macros: names, step counts and variables. With a name, the whole macro including its steps.'),
 	'macro_run': (
 		'Replay a saved macro with no model in the loop. Each step re-identifies its element from the '
 		'stored handle (backendNodeId, then xpath, then accessible name, then a unique attribute) and its '
-		'effect is compared with what was recorded. A step that cannot be resolved or does not reproduce '
-		'FAILS the call — it never comes back as a successful-looking report.'
+		'effect is compared with what was recorded; checkpoint steps wait for their condition. If the macro '
+		'was recorded mid-page and the browser is elsewhere, the page the first step was recorded on is opened '
+		'first. A step that cannot be resolved or does not reproduce FAILS the call — it never comes back as '
+		'a successful-looking report; the error names the step, so you can fix the page by hand and continue '
+		'with from_step, or re-teach the tail via macro_record ... replace_from. The same replay is available '
+		'without any model from a shell: `python -m bu_mcp.macro run NAME`.'
 	),
 }
 
@@ -2545,9 +2641,15 @@ class BuMcpServer:
 					walk(value, where, out)
 
 		steps = (macro or {}).get('steps')
-		for i, step in enumerate((steps if isinstance(steps, list) else []), start=1):
-			if not isinstance(step, dict):
-				continue
+		steps_list = [s for s in (steps if isinstance(steps, list) else []) if isinstance(s, dict)]
+		# Автостарт (macro.run, предусловие 4): если первый шаг — не навигация, а
+		# браузер стоит не там, повтор сам откроет страницу, где шаг записан.
+		# Это тоже адрес, куда макрос ПОЙДЁТ, и гейт обязан его видеть.
+		if steps_list and str(steps_list[0].get('tool') or '') not in ('browser_navigate', 'navigate'):
+			start_url = steps_list[0].get('url_before')
+			if isinstance(start_url, str) and start_url.strip():
+				found.append((start_url, 'auto-start: the page the first step was recorded on'))
+		for i, step in enumerate(steps_list, start=1):
 			label = f'step {step.get("n") or i} (`{step.get("tool") or "?"}`)'
 			from_params: list[tuple[str, str]] = []
 			walk(materialize(step.get('params')), f'{label} goes to', from_params)
@@ -2655,11 +2757,98 @@ class BuMcpServer:
 			compact=True,
 		)
 
-	async def _tool_macro_save(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
-		"""Схлопнуть выбранные записи журнала в макрос и положить его на диск."""
-		name = self._macro_name(args.get('name'))
-		journal_mod, entries, _path = self._journal_entries(args)
+	def _build_and_save_macro(
+		self,
+		journal_mod: Any,
+		name: str,
+		picked: list[dict[str, Any]],
+		*,
+		replace_from: int | None = None,
+		selected_by: str,
+	) -> dict[str, Any]:
+		"""Общий хвост ``macro_save`` и ``macro_record stop``: собрать, склеить, записать."""
+		if not picked:
+			raise ToolError(
+				f'Nothing to save ({selected_by}). Perform the actions first (they are recorded '
+				f'automatically), check them with journal_list, then save.'
+			)
+		try:
+			macro = journal_mod.to_macro(picked, name=name)
+		except Exception as exc:
+			raise ToolError(f'journal.to_macro failed: {type(exc).__name__}: {exc}') from exc
+		if not isinstance(macro, dict):
+			raise ToolError(f'journal.to_macro returned {type(macro).__name__}, expected a macro dict.')
 
+		if not (macro.get('steps') or []):
+			raise ToolError(
+				f'journal.to_macro produced a macro with no steps out of {len(picked)} journal entr(ies) '
+				f'({selected_by}). Observations are dropped on purpose; the entries must include actions that '
+				f'change state (browser_click / browser_type / browser_hover / browser_navigate / select_dropdown / '
+				f'send_keys / scroll) or checkpoints.'
+			)
+
+		merged_from: dict[str, Any] | None = None
+		if replace_from is not None:
+			at = int(replace_from)
+			if at < 1:
+				raise ToolError(f'replace_from must be >= 1, got {at}.')
+			base_path = self._macro_path(name)
+			if not base_path.exists():
+				raise ToolError(
+					f'replace_from={at} asks to repair macro {name!r}, but no such macro is saved. '
+					f'Save it without replace_from first.'
+				)
+			try:
+				base = json.loads(base_path.read_text(encoding='utf-8'))
+			except Exception as exc:
+				raise ToolError(f'Macro {name!r} at {base_path} is not readable JSON: {type(exc).__name__}: {exc}') from exc
+			base_steps = base.get('steps') or []
+			if at > len(base_steps) + 1:
+				raise ToolError(
+					f'replace_from={at} is past the end of macro {name!r}, which has {len(base_steps)} step(s). '
+					f'Use replace_from={len(base_steps) + 1} to append.'
+				)
+			try:
+				macro = journal_mod.merge_macro(base, macro, at=at)
+			except Exception as exc:
+				raise ToolError(f'journal.merge_macro failed: {type(exc).__name__}: {exc}') from exc
+			merged_from = {'kept': at - 1, 'base_steps': len(base_steps)}
+
+		try:
+			path = Path(journal_mod.save_macro(macro))
+		except Exception as exc:
+			raise ToolError(f'Cannot write macro {name!r}: {type(exc).__name__}: {exc}') from exc
+
+		steps = macro.get('steps') or []
+		tools = [s.get('tool') for s in steps if isinstance(s, dict)]
+		checkpoints = sum(1 for t in tools if t == 'checkpoint')
+		action = (
+			f'Saved macro {name!r}: {len(steps)} step(s)'
+			+ (f' ({checkpoints} checkpoint(s))' if checkpoints else '')
+			+ (f', steps 1..{merged_from["kept"]} kept from the previous version' if merged_from else '')
+			+ f' out of {len(picked)} journal entr(ies) ({selected_by}). '
+			f'Run it with macro_run(name="{name}") or from a shell: python -m bu_mcp.macro run {name}'
+		)
+		payload: dict[str, Any] = {
+			'action': action,
+			'name': name,
+			'file': str(path),
+			'steps': len(steps),
+			'tools': tools,
+			'vars': macro.get('vars') or {},
+		}
+		if macro.get('issues'):
+			payload['issues'] = macro['issues']
+		if macro.get('incomplete'):
+			payload['incomplete'] = True
+		if merged_from:
+			payload['repaired'] = merged_from
+		return payload
+
+	def _pick_journal_entries(
+		self, journal_mod: Any, entries: list[dict[str, Any]], args: dict[str, Any], *, name: str | None
+	) -> tuple[list[dict[str, Any]], str]:
+		"""Какие записи идут в макрос: ``include`` -> ``limit`` -> запись start/stop -> последние 20."""
 		include = args.get('include')
 		if include:
 			picked = []
@@ -2672,47 +2861,164 @@ class BuMcpServer:
 						f'use the `i` values it prints.'
 					)
 				picked.append(entries[i])
-		else:
-			picked = entries[-max(1, int(args.get('limit') or 20)) :]
+			return picked, f'{len(picked)} entries picked by position'
+		if args.get('limit'):
+			n = max(1, int(args['limit']))
+			return entries[-n:], f'the last {n} journal entries'
+		try:
+			found = journal_mod.span(entries, name=name) if hasattr(journal_mod, 'span') else None
+		except Exception as exc:
+			logger.warning('journal.span failed: %r', exc)
+			found = None
+		if found:
+			positions, info = found
+			state = 'still open' if info.get('open') else 'closed'
+			return [entries[i] for i in positions], f'recording {info.get("name")!r}, {state}'
+		return entries[-20:], 'the last 20 journal entries (no recording was started)'
 
-		if not picked:
-			raise ToolError(
-				'Nothing to save: the journal is empty. Perform the actions first (they are recorded '
-				'automatically), check them with journal_list, then call macro_save.'
+	async def _tool_macro_save(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
+		"""Схлопнуть выбранные записи журнала в макрос и положить его на диск."""
+		name = self._macro_name(args.get('name'))
+		journal_mod, entries, _path = self._journal_entries(args)
+		picked, selected_by = self._pick_journal_entries(journal_mod, entries, args, name=name)
+		replace_from = args.get('replace_from')
+		payload = self._build_and_save_macro(
+			journal_mod,
+			name,
+			picked,
+			replace_from=None if replace_from is None else int(replace_from),
+			selected_by=selected_by,
+		)
+		return self._text(payload, compact=True)
+
+	async def _tool_macro_record(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
+		"""Закладки в журнале: начало/конец обучения сценарию.
+
+		``start`` при уже открытой записи — отказ, а не тихое переоткрытие:
+		две вложенные записи означали бы, что одна из них потеряна, и лучше
+		сказать об этом сразу, чем сохранить не то.
+		"""
+		journal_mod = _bu_mcp('journal')
+		action = str(args.get('action') or '').strip().lower()
+		current = journal_mod.recording() if hasattr(journal_mod, 'recording') else None
+
+		if action == 'status':
+			if not current:
+				return self._text({'action': 'No recording is open.', 'recording': None}, compact=True)
+			entries = journal_mod.read()
+			since = int(current.get('since') or 0)
+			return self._text(
+				{
+					'action': f'Recording {current["name"]!r} is open: {max(0, len(entries) - since)} journal entr(ies) so far.',
+					'recording': current,
+					'entries_so_far': max(0, len(entries) - since),
+				},
+				compact=True,
 			)
 
-		try:
-			macro = journal_mod.to_macro(picked, name=name)
-		except Exception as exc:
-			raise ToolError(f'journal.to_macro failed: {type(exc).__name__}: {exc}') from exc
-		if not isinstance(macro, dict):
-			raise ToolError(f'journal.to_macro returned {type(macro).__name__}, expected a macro dict.')
-
-		steps = macro.get('steps') or []
-		if not steps:
-			raise ToolError(
-				f'journal.to_macro produced a macro with no steps out of {len(picked)} journal entr(ies). '
-				f'Observations are dropped on purpose; pick entries whose `tool` actually changes state '
-				f'(browser_click / browser_type / browser_hover / browser_navigate / select_dropdown / '
-				f'send_keys / scroll).'
+		if action == 'start':
+			name = self._macro_name(args.get('name'))
+			if current:
+				raise ToolError(
+					f'A recording named {current["name"]!r} is already open. Stop it first '
+					f'(macro_record action="stop") — nested recordings would lose one of them.'
+				)
+			if not journal_mod.enabled():
+				raise ToolError('The journal is disabled (BU_MCP_JOURNAL=0), so nothing can be recorded.')
+			marker = journal_mod.mark('start', name)
+			if not marker:
+				raise ToolError('Could not write the start marker to the journal; see the server log.')
+			exists = self._macro_path(name).exists()
+			return self._text(
+				{
+					'action': (
+						f'Recording {name!r} started. Work through the scenario now; every state-changing action '
+						f'and checkpoint is captured. Retries and mistakes are fine, they are collapsed away. '
+						f'When the goal is reached, call macro_record action="stop".'
+						+ (
+							f' A macro named {name!r} already exists: stop will overwrite it, or pass replace_from to repair it.'
+							if exists
+							else ''
+						)
+					),
+					'name': name,
+					'seq': marker.get('seq'),
+					'journal': str(journal_mod.current_path()),
+					'overwrites_existing': exists,
+				},
+				compact=True,
 			)
 
-		try:
-			path = Path(journal_mod.save_macro(macro))
-		except Exception as exc:
-			raise ToolError(f'Cannot write macro {name!r}: {type(exc).__name__}: {exc}') from exc
+		if action == 'stop':
+			name = self._macro_name(args.get('name') or (current or {}).get('name'))
+			if not current and not args.get('name'):
+				raise ToolError('No recording is open and no name was given. Call macro_record action="start" first.')
+			marker = journal_mod.mark('stop', name)
+			entries = journal_mod.read()
+			found = journal_mod.span(entries, name=name)
+			if not found:
+				raise ToolError(
+					f'No start marker for {name!r} in the current journal. Call macro_record action="start" first; '
+					f'or use macro_save with explicit `include` positions.'
+				)
+			positions, info = found
+			picked = [entries[i] for i in positions]
+			save = True if args.get('save') is None else bool(args.get('save'))
+			if not save:
+				return self._text(
+					{
+						'action': f'Recording {name!r} closed with {len(picked)} journal entr(ies); not saved (save=false).',
+						'name': name,
+						'entries': len(picked),
+						'seq': marker.get('seq'),
+					},
+					compact=True,
+				)
+			replace_from = args.get('replace_from')
+			payload = self._build_and_save_macro(
+				journal_mod,
+				name,
+				picked,
+				replace_from=None if replace_from is None else int(replace_from),
+				selected_by=f'recording {name!r}',
+			)
+			return self._text(payload, compact=True)
 
+		raise ToolError(f'Unknown action {action!r}: expected start, stop or status.')
+
+	async def _tool_checkpoint(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
+		"""Проверить условие на странице, дождавшись его. Не выполнилось — ``ToolError``.
+
+		Считает та же ``macro.checkpoint``, что и при повторе. Провал — ошибка,
+		а не ``{'ok': false}``: агент, который «валидирует, если нужно», должен
+		видеть невыполненное условие так же громко, как промах по элементу.
+		"""
+		macro_mod = _bu_mcp('macro')
+		try:
+			spec = macro_mod.checkpoint_spec(args)
+		except ValueError as exc:
+			raise ToolError(str(exc)) from exc
+		session, _ = await self._ensure_session()
+		await self._check_domain_gate('checkpoint')
+		self._journal_note(url_before=await self._current_url())
+		try:
+			verdict = await macro_mod.checkpoint(session, spec)
+		except macro_mod.StepFailed as exc:
+			raise ToolError(
+				f'{exc} The condition did not hold — the previous action may not have had its effect yet, '
+				f'or it produced something else. Take browser_state to see what is actually there.'
+			) from exc
+		url = verdict.get('url') or await self._current_url()
+		self._journal_note(url_after=url)
+		summary = ', '.join(f'{k}={v!r}' for k, v in spec.items() if k in ('text', 'not_text', 'url'))
 		return self._text(
 			{
-				'action': (
-					f'Saved macro {name!r}: {len(steps)} step(s) out of {len(picked)} journal entr(ies). '
-					f'Run it with macro_run(name="{name}").'
-				),
-				'name': name,
-				'file': str(path),
-				'steps': len(steps),
-				'tools': [s.get('tool') for s in steps if isinstance(s, dict)],
-				'vars': macro.get('vars') or {},
+				'action': f'Checkpoint held after {verdict.get("waited")}s: {summary}.',
+				'url': url,
+				'waited': verdict.get('waited'),
+				'attempts': verdict.get('attempts'),
+				'snippet': verdict.get('snippet'),
+				'timeout': spec.get('timeout'),
 			},
 			compact=True,
 		)
@@ -2779,6 +3085,10 @@ class BuMcpServer:
 		variables = args.get('vars') or {}
 		if not isinstance(variables, dict):
 			raise ToolError(f'`vars` must be an object, got {type(variables).__name__}.')
+		from_step = max(1, int(args.get('from_step') or 1))
+		total_steps = len(macro.get('steps') or [])
+		if from_step > total_steps:
+			raise ToolError(f'from_step={from_step} is past the end of macro {name!r}, which has {total_steps} step(s).')
 
 		session, _ = await self._ensure_session()
 		await self._check_domain_gate('macro_run')
@@ -2786,8 +3096,19 @@ class BuMcpServer:
 		# а исполнять подставленное — это и есть обход allowlist через vars.
 		self._macro_domain_gate(macro, self._macro_values(macro, variables))
 
+		new_tab: str | None = None
+		if args.get('new_tab'):
+			from browser_use.browser.session import create_target_params
+
+			try:
+				created = await session.cdp_client.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
+				new_tab = str(created['targetId'])
+				await session.get_or_create_cdp_session(new_tab, focus=True)
+			except Exception as exc:
+				raise ToolError(f'Could not open a tab for the macro: {type(exc).__name__}: {exc}') from exc
+
 		try:
-			out = await macro_mod.run(session, macro, vars=variables, strict=strict)
+			out = await macro_mod.run(session, macro, vars=variables, strict=strict, from_step=from_step)
 		except ToolError:
 			raise
 		except Exception as exc:
@@ -2797,11 +3118,16 @@ class BuMcpServer:
 			raise ToolError(f'macro.run returned {type(out).__name__}, expected the contract dict with `ok`/`steps`.')
 
 		payload: dict[str, Any] = {'name': name, 'strict': strict, 'file': str(path), **out}
+		if new_tab:
+			payload['tab'] = self._short_tab_id(new_tab)
 		if not out.get('ok'):
-			payload['action'] = f'Macro {name!r} FAILED at step {out.get("failed_at")}.'
+			failed_at = out.get('failed_at')
+			payload['action'] = f'Macro {name!r} FAILED at step {failed_at}.'
 			raise ToolError(
-				f'Macro {name!r} FAILED at step {out.get("failed_at")} (strict={strict}). The remaining '
-				f'steps did not run in strict mode. Full report: {self._json(payload, compact=True)}'
+				f'Macro {name!r} FAILED at step {failed_at} (strict={strict}). The remaining '
+				f'steps did not run in strict mode. To repair: fix the page by hand and macro_run(from_step={failed_at}), '
+				f'or macro_record start name="{name}", redo the work from step {failed_at} on, and stop with '
+				f'replace_from={failed_at}. Full report: {self._json(payload, compact=True)}'
 			)
 		payload['action'] = f'Macro {name!r} replayed {len(out.get("steps") or [])} step(s), all verified.'
 		return self._text(payload, compact=True)
@@ -2878,6 +3204,10 @@ class BuMcpServer:
 				'macro_save': self._tool_macro_save,
 				'macro_list': self._tool_macro_list,
 				'macro_run': self._tool_macro_run,
+				'macro_record': self._tool_macro_record,
+				# Единственное наблюдение, которое журналируется: оно становится
+				# шагом-проверкой макроса.
+				'checkpoint': self._tool_checkpoint,
 			}
 			if name in overrides:
 				run = overrides[name]
@@ -2922,10 +3252,14 @@ class BuMcpServer:
 			'`delta.no_effect` means the action reported success but nothing changed — treat that step '
 			'as NOT done and check browser_state before continuing.\n\n'
 			'Every state-changing action is also written to a journal with the element handle it used. '
-			'To repeat a sequence without a model in the loop: journal_list to see what was recorded, '
-			'macro_save to turn those entries into a macro, macro_run to replay it. Replay re-identifies '
-			'elements from their handles, so it survives a reload that invalidates every index; a step '
-			'that cannot be reproduced fails the call.\n\n'
+			'Teach-then-replay: when the user walks you through a task they will want repeated, call '
+			'macro_record action="start" with a name first, do the task (add a checkpoint after every action '
+			'whose result matters — a reply appeared, a page changed), then macro_record action="stop": the '
+			'macro is built from exactly that stretch of the journal. macro_run replays it with no model in '
+			'the loop; so does `python -m bu_mcp.macro run NAME` from a shell. Replay re-identifies elements '
+			'from their handles, so it survives a reload that invalidates every index; a step that cannot be '
+			'reproduced, or a checkpoint that does not hold, fails the call at that step. To repair: redo the '
+			'work from that step under macro_record and stop with replace_from=N.\n\n'
 			'Domain policy: a single allowlist from BU_MCP_ALLOWED_DOMAINS (comma separated, empty '
 			'means unrestricted). There is no deny list, so there is no allow-vs-deny precedence to '
 			'reason about: what is not listed is blocked.'

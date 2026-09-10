@@ -64,12 +64,27 @@ __all__ = [
 	'list_macros',
 	'home',
 	'reset',
+	'mark',
+	'recording',
+	'span',
+	'merge_macro',
 	'MACRO_VERSION',
 	'OBSERVATIONS',
 	'STATE_CHANGING',
+	'MARKER_TOOL',
+	'CHECKPOINT_TOOL',
 ]
 
 MACRO_VERSION = 1
+
+#: Служебная запись «здесь началась / закончилась запись сценария». Пишется
+#: ``mark``, в макрос никогда не попадает, нужна только чтобы ``span`` нашёл
+#: границы без подсчёта позиций руками.
+MARKER_TOOL = 'macro_mark'
+
+#: Проверка «на странице есть текст X / адрес содержит Y». Не меняет состояние,
+#: но в отличие от наблюдений В МАКРОС ИДЁТ: это и есть валидация при повторе.
+CHECKPOINT_TOOL = 'checkpoint'
 
 # --------------------------------------------------------------------------- #
 # Классификация инструментов
@@ -146,6 +161,7 @@ _DROP_REASONS = {
 	'and scroll offsets do not carry across viewports',
 	'tab': 'tab lifecycle is not reproducible: the recorded tab_id belongs to that run only, and replaying a close '
 	'would target whatever tab happens to hold that id now — possibly one that is not ours',
+	'marker': 'recording marker: a bookmark in the journal, not an action',
 }
 
 # --------------------------------------------------------------------------- #
@@ -197,9 +213,86 @@ def macro_path(name: str) -> Path:
 
 def reset(*, session_id: str | None = None) -> None:
 	"""Начать новый журнал. Нужно тестам и «запиши сценарий заново»."""
-	global _SESSION_ID, _SEQ
+	global _SESSION_ID, _SEQ, _RECORDING
 	_SESSION_ID = session_id
 	_SEQ = 0
+	_RECORDING = None
+
+
+# --------------------------------------------------------------------------- #
+# Границы записи сценария
+# --------------------------------------------------------------------------- #
+
+#: Активная запись: ``{'name', 'since'}``, где ``since`` — позиция в журнале
+#: (индекс в ``read()``) ПЕРВОЙ записи после стартового маркера. Хранится в
+#: памяти процесса и дублируется маркером в файле: память — быстрый ответ на
+#: «идёт ли запись», файл — истина, которая переживает всё остальное.
+_RECORDING: dict[str, Any] | None = None
+
+
+def mark(event: str, name: str, **extra: Any) -> dict[str, Any]:
+	"""Поставить маркер начала/конца записи сценария ``name``.
+
+	Зачем маркеры, если есть ``macro_save(include=[...])``. Потому что режим
+	«сначала показываю агенту, что делать, потом он превращает это в скрипт»
+	означает, что между «начали» и «закончили» агент десять раз ошибётся,
+	перепечатает и посмотрит. Считать позиции руками после этого — работа,
+	которую никто не сделает правильно. Маркер ставится один раз в начале и
+	один раз в конце, а всё между ними — и есть сценарий (``span``).
+
+	Возвращает записанный конверт с ``seq``; при выключенном журнале — пустой.
+	"""
+	global _RECORDING
+	event = str(event or '').strip().lower()
+	assert event in ('start', 'stop'), f'mark: event must be start|stop, got {event!r}'
+	entry: dict[str, Any] = {'tool': MARKER_TOOL, 'params': {'event': event, 'name': _safe_name(name), **extra}}
+	seq = record(entry)
+	if seq is None:
+		return {}
+	entry['seq'] = seq
+	if event == 'start':
+		_RECORDING = {'name': _safe_name(name), 'since': len(read()), 'seq': seq}
+	else:
+		_RECORDING = None
+	return entry
+
+
+def recording() -> dict[str, Any] | None:
+	"""Активная запись (имя, с какой позиции идёт) или ``None``."""
+	return dict(_RECORDING) if _RECORDING else None
+
+
+def span(entries: list[dict[str, Any]], *, name: str | None = None) -> tuple[list[int], dict[str, Any]] | None:
+	"""Позиции записей между последним стартовым маркером и его стоп-маркером.
+
+	``name`` сужает поиск до записи с этим именем; без имени берётся последняя
+	начатая. Стоп-маркера может не быть (запись ещё идёт) — тогда до конца
+	журнала. Возвращает ``(positions, info)`` или ``None``, если стартового
+	маркера нет. Сами маркеры в ``positions`` не входят.
+	"""
+	want = _safe_name(name) if name else None
+	start: int | None = None
+	for i in range(len(entries) - 1, -1, -1):
+		e = entries[i]
+		if e.get('tool') != MARKER_TOOL:
+			continue
+		p = e.get('params') or {}
+		if p.get('event') == 'start' and (want is None or p.get('name') == want):
+			start = i
+			break
+	if start is None:
+		return None
+	found_name = (entries[start].get('params') or {}).get('name')
+	stop: int | None = None
+	for i in range(start + 1, len(entries)):
+		e = entries[i]
+		p = e.get('params') or {}
+		if e.get('tool') == MARKER_TOOL and p.get('event') == 'stop' and p.get('name') == found_name:
+			stop = i
+			break
+	end = stop if stop is not None else len(entries)
+	positions = [i for i in range(start + 1, end) if entries[i].get('tool') != MARKER_TOOL]
+	return positions, {'name': found_name, 'start': start, 'stop': stop, 'open': stop is None}
 
 
 def _safe_name(name: str) -> str:
@@ -286,8 +379,8 @@ async def capture(session: Any, index: int | None = None) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def record(entry: dict[str, Any]) -> None:
-	"""Дописать одну запись в журнал текущей сессии.
+def record(entry: dict[str, Any]) -> int | None:
+	"""Дописать одну запись в журнал текущей сессии. Возвращает её ``seq`` или ``None``.
 
 	Контрактные поля: ``tool``, ``params``, ``handle``, ``url_before``,
 	``url_after``, ``delta``, ``outcome`` (``ok`` / ``noop`` / ``error``),
@@ -309,14 +402,14 @@ def record(entry: dict[str, Any]) -> None:
 	global _SEQ
 	try:
 		if not enabled():
-			return
+			return None
 		tool = str(entry.get('tool') or '').strip()
 		if not tool:
-			return
+			return None
 		if tool in OBSERVATIONS:
 			# Наблюдения не пишем совсем: они не меняют состояние, а объём журнала
 			# определяют именно они (browser_state — самый частый вызов агента).
-			return
+			return None
 
 		_SEQ += 1
 		payload: dict[str, Any] = {
@@ -336,8 +429,10 @@ def record(entry: dict[str, Any]) -> None:
 		path = current_path()
 		with path.open('a', encoding='utf-8') as fh:
 			fh.write(line + '\n')
+		return _SEQ
 	except Exception as exc:
 		logger.debug('journal: record failed: %r', exc)
+		return None
 
 
 def _sanitize(value: Any, _depth: int = 0) -> Any:
@@ -558,6 +653,17 @@ def _expectation(entry: dict[str, Any]) -> dict[str, Any]:
 	url_before, url_after = entry.get('url_before'), entry.get('url_after')
 
 	expect: dict[str, Any] = {}
+	if str(entry.get('tool') or '') in ('browser_navigate', 'navigate'):
+		# Навигация — единственный шаг, у которого цель известна заранее. Сверять
+		# «изменился ли URL» тут нельзя: при записи в новую вкладку ``url_before``
+		# снят с ПРЕЖНЕЙ вкладки (а там мог быть тот же адрес), а переход на
+		# страницу, где уже стоишь, ничего не меняет и при этом верен. Ожидание —
+		# «приехали туда же, куда и при записи»; ``macro.run`` дополнит его
+		# адресом из параметров (переменная ``start_url`` может быть подменена).
+		expect['navigate'] = True
+		if url_after:
+			expect['url_after'] = url_after
+		return expect
 	changed = delta.get('changed')
 	if changed is not None:
 		expect['changed'] = bool(changed)
@@ -587,9 +693,17 @@ def _params_for_macro(entry: dict[str, Any]) -> dict[str, Any]:
 	params = dict(entry.get('params') or {})
 	params.pop('index', None)
 	# Таймауты — свойство прогона, а не сценария: на другой машине они другие.
-	# ``macro.run`` назначает свои.
-	params.pop('timeout', None)
+	# ``macro.run`` назначает свои. Исключение — чекпоинт: его ``timeout`` —
+	# это «сколько ждать ответа», часть смысла шага, а не техники.
+	if str(entry.get('tool')) != CHECKPOINT_TOOL:
+		params.pop('timeout', None)
 	params.pop('hydrate', None)
+	# Макрос живёт в той вкладке, в которой стартовал (см. macro._ensure_target).
+	# ``new_tab`` при записи означал «открой мне отдельную вкладку», а при
+	# повторе открыл бы ЕЩЁ одну и увёл навигацию из своей вкладки: шаг
+	# отчитывался бы «открыл», а сверка видела бы неизменившийся URL. Поймано
+	# на chatgpt.com первым же повтором.
+	params.pop('new_tab', None)
 	return params
 
 
@@ -651,6 +765,13 @@ def to_macro(entries: list[dict[str, Any]], *, name: str) -> dict[str, Any]:
 	   ``incomplete``, а шаг остаётся с явным ``unreplayable``: молча выкинуть
 	   шаг из сценария нельзя, это изменило бы его смысл.
 
+	8. **Чекпоинты остаются, маркеры нет.** ``checkpoint`` — единственное
+	   «наблюдение», которое идёт в макрос: это не разведка, а заявленное
+	   агентом условие («здесь на странице должен быть ответ»), и при повторе
+	   оно проверяется как шаг. Провалившийся при записи чекпоинт выкидывается
+	   правилом 2 — условие тогда ещё не выполнялось. ``macro_mark`` — закладка
+	   для ``span``, действия за ней нет.
+
 	Параметризация. Введённый текст становится именованной переменной; имя
 	выводится из подписи поля (``aria-label`` -> accessible name, куда AccName
 	уже включил ``<label>`` и ``placeholder`` -> ``name``/``id`` -> тег).
@@ -680,6 +801,9 @@ def to_macro(entries: list[dict[str, Any]], *, name: str) -> dict[str, Any]:
 		tool = str(entry.get('tool') or '')
 		if not tool or tool in OBSERVATIONS:
 			drop(entry, 'observation')
+			continue
+		if tool == MARKER_TOOL:
+			drop(entry, 'marker')
 			continue
 		if (entry.get('outcome') or 'ok') == 'error':
 			drop(entry, 'error', str(entry.get('error') or '')[:120])
@@ -775,7 +899,9 @@ def to_macro(entries: list[dict[str, Any]], *, name: str) -> dict[str, Any]:
 			'seq': entry.get('seq'),
 			'tool': tool,
 			'params': params,
-			'expect': _expectation(entry),
+			# У чекпоинта ожидание — он сам; дельта у него пустая по построению,
+			# и «страница не изменилась» тут не расхождение, а норма.
+			'expect': {} if tool == CHECKPOINT_TOOL else _expectation(entry),
 		}
 		if nav_url:
 			# Литеральный адрес дублируется в шаг СПЕЦИАЛЬНО. После параметризации
@@ -824,6 +950,78 @@ def to_macro(entries: list[dict[str, Any]], *, name: str) -> dict[str, Any]:
 		'issues': issues,
 		'incomplete': incomplete,
 	}
+
+
+def _rename_vars(node: Any, rename: dict[str, str]) -> Any:
+	if isinstance(node, dict):
+		if set(node) == {'$var'} and str(node['$var']) in rename:
+			return {'$var': rename[str(node['$var'])]}
+		return {k: _rename_vars(v, rename) for k, v in node.items()}
+	if isinstance(node, list):
+		return [_rename_vars(v, rename) for v in node]
+	return node
+
+
+def merge_macro(base: dict[str, Any], patch: dict[str, Any], *, at: int) -> dict[str, Any]:
+	"""Заменить в ``base`` всё начиная с шага ``at`` шагами из ``patch``.
+
+	Это «починка»: повтор упал на шаге N, агент с моделью прошёл оставшуюся
+	часть заново, и новая запись должна встать на место старого хвоста, а не
+	рядом с ним. Шаги ``1..N-1`` берутся из ``base`` как есть — они уже
+	доказали, что воспроизводятся.
+
+	Переменные: одноимённая переменная с ДРУГИМ значением в ``patch``
+	переименовывается (``name_2``) вместе со ссылками в новых шагах. Старые
+	шаги ссылаются на старое имя, и молча подменить им значение — значит
+	изменить смысл шагов, которые никто не перезаписывал.
+	"""
+	at = int(at)
+	assert at >= 1, f'merge_macro: at must be >= 1, got {at}'
+	old_steps = [s for s in (base.get('steps') or []) if isinstance(s, dict)]
+	keep = [dict(s) for s in old_steps if int(s.get('n') or 0) < at]
+
+	variables: dict[str, Any] = dict(base.get('vars') or {})
+	rename: dict[str, str] = {}
+	for name, spec in (patch.get('vars') or {}).items():
+		if name in variables and variables[name] != spec:
+			new, n = name, 2
+			while new in variables:
+				new = f'{name}_{n}'
+				n += 1
+			rename[name] = new
+			variables[new] = spec
+		else:
+			variables[name] = spec
+
+	new_steps = [_rename_vars(dict(s), rename) for s in (patch.get('steps') or []) if isinstance(s, dict)]
+	steps = keep + new_steps
+	for i, step in enumerate(steps, start=1):
+		step['n'] = i
+
+	out = dict(base)
+	out.update(
+		{
+			'version': MACRO_VERSION,
+			'created': datetime.now(timezone.utc).isoformat(timespec='seconds'),
+			'source': {
+				'base': base.get('source'),
+				'replaced_from': at,
+				'kept': len(keep),
+				'patched': len(new_steps),
+				'entries': (patch.get('source') or {}).get('entries'),
+			},
+			'vars': variables,
+			'steps': steps,
+			'dropped': patch.get('dropped') or [],
+			'issues': list(patch.get('issues') or []),
+			'incomplete': any(s.get('unreplayable') for s in steps),
+		}
+	)
+	if len(keep) < at - 1:
+		out['issues'].append(f'base macro had only {len(keep)} step(s) before step {at}; the patch was appended after them')
+	if rename:
+		out['issues'].append(f'variables renamed to avoid clobbering the base macro: {rename}')
+	return out
 
 
 # --------------------------------------------------------------------------- #
@@ -983,7 +1181,12 @@ if __name__ == '__main__':
 				kw.setdefault('url_before', base)
 				record({'tool': tool, **kw})
 
-			w('browser_navigate', params={'url': base}, url_after=base, delta={'changed': True, 'status': 'changed'})
+			w(
+				'browser_navigate',
+				params={'url': base, 'new_tab': True},
+				url_after=base,
+				delta={'changed': True, 'status': 'changed'},
+			)
 			w('browser_state', params={})
 			w(
 				'browser_type',
@@ -1045,6 +1248,7 @@ if __name__ == '__main__':
 				('скролл-механика выкинута', 'scroll' not in tools_kept),
 				('close выкинут', 'close' not in tools_kept),
 				('индексов в params нет', all('index' not in s['params'] for s in macro['steps'])),
+				('new_tab у навигации вычищен', all('new_tab' not in s['params'] for s in macro['steps'])),
 				('хендлы на месте', all('hint' in s for s in macro['steps'] if s['tool'] in ELEMENT_TOOLS)),
 				('url-переход записан в expect', any(s['expect'].get('url_changed') for s in macro['steps'])),
 			]

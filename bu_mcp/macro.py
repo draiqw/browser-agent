@@ -44,16 +44,36 @@ import asyncio
 import importlib
 import logging
 import re
+import sys
 import time
 from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
-__all__ = ['StepFailed', 'run', 'probe', 'delta', 'DEFAULT_STEP_TIMEOUT', 'DEFAULT_SETTLE_TIMEOUT']
+__all__ = [
+	'StepFailed',
+	'run',
+	'probe',
+	'delta',
+	'checkpoint',
+	'checkpoint_spec',
+	'cdp_url',
+	'DEFAULT_STEP_TIMEOUT',
+	'DEFAULT_SETTLE_TIMEOUT',
+	'DEFAULT_CHECKPOINT_TIMEOUT',
+]
 
 DEFAULT_STEP_TIMEOUT = 15.0
 DEFAULT_SETTLE_TIMEOUT = 8.0
 DEFAULT_NAV_TIMEOUT = 10.0
+#: Сколько чекпоинт ждёт выполнения условия, если в нём не сказано иначе.
+#: Больше шага: типичный чекпоинт — «ответ появился», а ответ генерируется.
+DEFAULT_CHECKPOINT_TIMEOUT = 20.0
+MAX_CHECKPOINT_TIMEOUT = 600.0
+
+#: Имя шага-проверки. Зеркало ``journal.CHECKPOINT_TOOL``; литерал здесь, чтобы
+#: модуль повтора не тянул журнал на импорте.
+CHECKPOINT_TOOL = 'checkpoint'
 
 #: Столько раз перепроверяем «дельта пуста, а ожидали изменение», с такой паузой.
 #: Те же числа, что в ``server.DELTA_RECHECKS`` и по той же причине: эскалация
@@ -253,6 +273,143 @@ def _consequence(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any
 
 
 # --------------------------------------------------------------------------- #
+# Чекпоинт: условие на странице, которого ждём
+# --------------------------------------------------------------------------- #
+
+_CHECKPOINT_JS = """(() => {
+  const body = document.body ? (document.body.innerText || '') : '';
+  return { url: location.href, title: document.title || '', text: body.slice(0, 400000) };
+})()"""
+
+
+def checkpoint_spec(params: dict[str, Any] | None) -> dict[str, Any]:
+	"""Проверить и нормализовать параметры чекпоинта. Бросает ``ValueError``.
+
+	Условие — конъюнкция того, что задано: ``text`` (на странице есть такой
+	текст), ``not_text`` (такого текста нет), ``url`` (адрес содержит
+	подстроку). Хотя бы одно обязательно: чекпоинт без условия — это пауза, а
+	пауз в этом слое нет. ``timeout`` — сколько ждать, пока условие выполнится;
+	это часть смысла шага («ответ приходит за минуту»), поэтому он, в отличие от
+	остальных таймаутов, в макрос записывается.
+	"""
+	params = dict(params or {})
+	spec: dict[str, Any] = {}
+	for key in ('text', 'not_text', 'url'):
+		value = params.get(key)
+		if value is None or value == '':
+			continue
+		if not isinstance(value, str):
+			raise ValueError(f'checkpoint: `{key}` must be a string, got {type(value).__name__}')
+		if not value.strip():
+			raise ValueError(f'checkpoint: `{key}` is blank')
+		spec[key] = value
+	if not spec:
+		raise ValueError(
+			'checkpoint needs at least one of `text`, `not_text`, `url` — a checkpoint with no condition is just a pause'
+		)
+	raw_timeout = params.get('timeout')
+	timeout = DEFAULT_CHECKPOINT_TIMEOUT if raw_timeout in (None, '') else float(raw_timeout)
+	if not 0 <= timeout <= MAX_CHECKPOINT_TIMEOUT:
+		raise ValueError(f'checkpoint: `timeout` must be within 0..{MAX_CHECKPOINT_TIMEOUT:g} seconds, got {timeout:g}')
+	spec['timeout'] = timeout
+	note = params.get('note')
+	if isinstance(note, str) and note.strip():
+		spec['note'] = note.strip()
+	return spec
+
+
+def _text_pattern(needle: str) -> re.Pattern[str]:
+	"""Подстрока без учёта регистра и с любым пробельным между словами.
+
+	Страница отдаёт ``innerText`` с переносами там, где в разметке блоки, а
+	агент пишет условие одной строкой. Сравнивать буквально — значит ловить
+	«не найдено» на каждом ``<br>``.
+	"""
+	words = [re.escape(w) for w in needle.split()]
+	return re.compile(r'\s+'.join(words), re.IGNORECASE)
+
+
+def _checkpoint_verdict(spec: dict[str, Any], page: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+	"""Какие условия не выполнились и что при этом видно на странице."""
+	text = str(page.get('text') or '')
+	url = str(page.get('url') or '')
+	failed: list[dict[str, Any]] = []
+	seen: dict[str, Any] = {'url': url, 'title': page.get('title') or '', 'text_chars': len(text)}
+
+	if 'text' in spec:
+		m = _text_pattern(spec['text']).search(text)
+		if m:
+			lo, hi = max(0, m.start() - 80), min(len(text), m.end() + 80)
+			seen['snippet'] = re.sub(r'\s+', ' ', text[lo:hi]).strip()
+		else:
+			failed.append({'field': 'text', 'expected': spec['text'], 'observed': 'not on the page'})
+	if 'not_text' in spec:
+		m = _text_pattern(spec['not_text']).search(text)
+		if m:
+			lo, hi = max(0, m.start() - 80), min(len(text), m.end() + 80)
+			failed.append(
+				{
+					'field': 'not_text',
+					'expected': f'absent: {spec["not_text"]}',
+					'observed': re.sub(r'\s+', ' ', text[lo:hi]).strip(),
+				}
+			)
+	if 'url' in spec and spec['url'].casefold() not in url.casefold():
+		failed.append({'field': 'url', 'expected': f'contains {spec["url"]}', 'observed': url})
+	return failed, seen
+
+
+async def checkpoint(
+	session: Any,
+	params: dict[str, Any] | None,
+	*,
+	timeout: float | None = None,
+	poll: float = 0.5,
+) -> dict[str, Any]:
+	"""Ждать, пока условие выполнится. Не выполнилось за ``timeout`` — ``StepFailed``.
+
+	Одна реализация на обе стороны: сервер зовёт её в момент обучения (агент
+	спрашивает «ответ уже есть?» и ждёт), ``run`` — при повторе как шаг. Если
+	бы проверка при записи и при повторе считалась разным кодом, они бы
+	разошлись на первом же переносе строки.
+
+	Опрос, а не одна проба: чекпоинт по определению стоит ПОСЛЕ действия,
+	последствия которого приходят асинхронно (ответ модели, результат поиска,
+	редирект после логина). Ждём столько, сколько сказано в самом чекпоинте.
+	"""
+	spec = checkpoint_spec(params)
+	budget = spec['timeout'] if timeout is None else float(timeout)
+	started = time.monotonic()
+	deadline = started + budget
+	attempts = 0
+	last_failed: list[dict[str, Any]] = []
+	last_seen: dict[str, Any] = {}
+	while True:
+		attempts += 1
+		try:
+			page = await asyncio.wait_for(_evaluate(session, _CHECKPOINT_JS), timeout=5.0)
+		except Exception as exc:
+			raise StepFailed(f'checkpoint: cannot read the page: {type(exc).__name__}: {exc}') from exc
+		if not isinstance(page, dict):
+			raise StepFailed('checkpoint: the page probe returned nothing readable')
+		last_failed, last_seen = _checkpoint_verdict(spec, page)
+		waited = round(time.monotonic() - started, 3)
+		if not last_failed:
+			out: dict[str, Any] = {'ok': True, 'attempts': attempts, 'waited': waited, 'spec': spec, **last_seen}
+			return out
+		if time.monotonic() >= deadline:
+			break
+		await asyncio.sleep(min(poll, max(0.05, deadline - time.monotonic())))
+
+	why = '; '.join(f'{f["field"]}: expected {f["expected"]!r}, observed {str(f["observed"])[:160]!r}' for f in last_failed)
+	raise StepFailed(
+		f'CHECKPOINT FAILED after {attempts} check(s) over {budget:g}s: {why}. Page: {last_seen.get("url")!r} '
+		f'titled {last_seen.get("title")!r}.' + (f' Note: {spec["note"]}' if spec.get('note') else ''),
+		discrepancies=[dict(f, severity='stop', why='checkpoint condition not met') for f in last_failed],
+	)
+
+
+# --------------------------------------------------------------------------- #
 # Сверка ожидания с наблюдением
 # --------------------------------------------------------------------------- #
 
@@ -305,6 +462,28 @@ def _compare(expect: dict[str, Any], observed: dict[str, Any]) -> list[dict[str,
 			'could not read the page before/after the action (CDP probe failed), so nothing was verified; '
 			'refusing to call an unverified step a success',
 		)
+		return out
+
+	if expect.get('navigate'):
+		# Шаг навигации: важно лишь, куда приехали. Подходит и записанный адрес
+		# (редирект тот же, что при записи), и адрес из параметров (переменная
+		# подменена сознательно). Ни ``changed``, ни ``url_changed`` здесь не
+		# сравниваются: переход на страницу, где уже стоишь, ничем не отличается
+		# от «ничего не произошло», и при этом он верен.
+		got = observed.get('url_after')
+		wanted = [u for u in (expect.get('url_target'), expect.get('url_after')) if isinstance(u, str) and u]
+		if got and wanted:
+			verdicts = {_same_page(u, got) for u in wanted}
+			if 'same' not in verdicts and 'query' not in verdicts:
+				add(
+					'url_after',
+					wanted[0],
+					got,
+					'stop',
+					'the navigation landed somewhere else than at record time (a redirect, a login wall or a blocked URL)',
+				)
+			elif 'same' not in verdicts:
+				add('url_after', wanted[0], got, 'note', 'same page, different query string or fragment')
 		return out
 
 	want_changed = expect.get('changed')
@@ -762,6 +941,8 @@ async def run(
 	raise_on_failure: bool = False,
 	step_timeout: float = DEFAULT_STEP_TIMEOUT,
 	settle_timeout: float = DEFAULT_SETTLE_TIMEOUT,
+	from_step: int = 1,
+	auto_start: bool = True,
 ) -> dict[str, Any]:
 	"""Прогнать макрос. Без модели, без индексов, без записанных таймингов.
 
@@ -778,6 +959,14 @@ async def run(
 			пропускается (выполнять его нечем).
 		raise_on_failure: пробросить ``StepFailed`` наружу вместо конверта.
 			По умолчанию выключено: контракт обещает вернуть dict.
+		from_step: начать с этого шага (нумерация с 1). Нужно починке: повтор
+			упал на шаге N, состояние до него уже воспроизведено руками или
+			прошлым прогоном, и заново гонять начало незачем.
+		auto_start: если первый исполняемый шаг — не навигация, а браузер
+			стоит на ДРУГОЙ странице, чем та, где этот шаг записан, — сначала
+			перейти туда. Без этого сценарий, записанный «с середины» (агент
+			уже был на нужной странице), из свежей вкладки падает на первом же
+			«элемент не найден», хотя адрес страницы известен из записи.
 
 	Returns:
 		``{'ok', 'steps', 'failed_at', 'vars', 'discrepancies', 'warnings',
@@ -787,7 +976,9 @@ async def run(
 	"""
 	waiting_mod = importlib.import_module('bu_mcp.waiting')
 	started = time.perf_counter()
-	steps_in = list(macro.get('steps') or [])
+	from_step = max(1, int(from_step or 1))
+	all_steps = [s for s in (macro.get('steps') or []) if isinstance(s, dict)]
+	steps_in = [s for s in all_steps if int(s.get('n') or 0) >= from_step]
 	report: dict[str, Any] = {
 		'ok': False,
 		'name': macro.get('name'),
@@ -798,6 +989,10 @@ async def run(
 		'warnings': [],
 		'probe': _probe_source()[1],
 	}
+	if from_step > 1:
+		report['from_step'] = from_step
+		if all_steps and not steps_in:
+			report['warnings'].append(f'from_step={from_step} is past the last step ({all_steps[-1].get("n")}); nothing to run')
 
 	def finish() -> dict[str, Any]:
 		report['elapsed'] = round(time.perf_counter() - started, 3)
@@ -861,6 +1056,25 @@ async def run(
 			return stop(0, verdict['why'])
 		report['warnings'].append(verdict['why'])
 
+	# --- предусловие 4: та ли это страница ----------------------------------- #
+	first = steps_in[0]
+	if auto_start and str(first.get('tool') or '') not in ('browser_navigate', 'navigate'):
+		want = first.get('url_before')
+		have = current_probe.get('url')
+		if isinstance(want, str) and want and isinstance(have, str) and _same_page(want, have) == 'different':
+			try:
+				baseline = await waiting_mod.navigation_baseline(session)
+				await _act(session, 'browser_navigate', {'url': want}, None, None)
+				await waiting_mod.wait_after_navigation(session, timeout=DEFAULT_NAV_TIMEOUT, baseline=baseline)
+			except StepFailed as exc:
+				return stop(0, f'auto_start: could not open {want!r}, where step {first.get("n")} was recorded: {exc}')
+			except Exception as exc:
+				return stop(0, f'auto_start: could not open {want!r}: {type(exc).__name__}: {exc}')
+			report['auto_start'] = want
+			report['warnings'].append(
+				f'auto_start: the browser was on {have!r}; opened {want!r}, where step {first.get("n")} was recorded'
+			)
+
 	# --- шаги ---------------------------------------------------------------- #
 	for step in steps_in:
 		n = int(step.get('n') or (len(report['steps']) + 1))
@@ -876,6 +1090,9 @@ async def run(
 
 		try:
 			params = _materialize(step.get('params') or {}, values)
+			if expect.get('navigate') and isinstance(params.get('url'), str):
+				# Куда шаг идёт НА САМОМ ДЕЛЕ (после подстановки переменных).
+				expect = dict(expect, url_target=params['url'])
 		except KeyError as exc:
 			record.update(status='failed', error=f'missing variable {exc}')
 			report['steps'].append(record)
@@ -889,6 +1106,16 @@ async def run(
 			# Ожидание — не пауза: ждём, пока страница успокоится сама.
 			await waiting_mod.wait_for_page_ready(session, timeout=settle_timeout)
 
+			if tool == CHECKPOINT_TOOL:
+				# Проверка, а не действие: ни резолва, ни дельты. Ждём ровно
+				# столько, сколько записано в самом чекпоинте.
+				verdict = await checkpoint(session, params)
+				record['action'] = f'checkpoint held after {verdict.get("waited")}s ({verdict.get("attempts")} check(s))'
+				record['checkpoint'] = {k: verdict.get(k) for k in ('waited', 'attempts', 'url', 'snippet') if k in verdict}
+				record['elapsed'] = round(time.perf_counter() - step_started, 3)
+				report['steps'].append(record)
+				continue
+
 			node = live_index = None
 			if step.get('hint'):
 				node, live_index, info = await _resolve_step(
@@ -898,7 +1125,8 @@ async def run(
 				record.update(info)
 
 			before = await probe(session)
-			baseline = await waiting_mod.navigation_baseline(session) if expect.get('url_changed') else None
+			navigates = bool(expect.get('url_changed') or expect.get('navigate'))
+			baseline = await waiting_mod.navigation_baseline(session) if navigates else None
 
 			record['action'] = await _act(session, tool, params, node, live_index)
 
@@ -984,13 +1212,215 @@ async def run(
 
 
 # --------------------------------------------------------------------------- #
+# Командная строка: повтор без сервера и без модели
+# --------------------------------------------------------------------------- #
+
+
+def cdp_url(explicit: str | None = None, *, profile: str | None = None) -> str:
+	"""Куда подключаться: аргумент -> ``BU_MCP_CDP_URL`` -> порт профиля из реестра.
+
+	Реестр — тот же ``~/.config/bu-mcp/profiles`` (``имя<TAB>порт``), который
+	ведёт ``scripts/chrome-automation.sh``; второго источника правды о портах
+	нет. Профиль — ``--profile`` или ``BU_PROFILE``, по умолчанию ``default``.
+	"""
+	import os
+	from pathlib import Path
+
+	if explicit:
+		return explicit
+	env = os.getenv('BU_MCP_CDP_URL')
+	if env:
+		return env
+	name = (profile or os.getenv('BU_PROFILE') or 'default').strip()
+	registry = Path(os.getenv('BU_MCP_HOME') or (Path.home() / '.config' / 'bu-mcp')) / 'profiles'
+	port = 9222
+	try:
+		for line in registry.read_text(encoding='utf-8').splitlines():
+			parts = line.rstrip('\n').split('\t')
+			if len(parts) == 2 and parts[0] == name and parts[1].strip().isdigit():
+				port = int(parts[1])
+				break
+	except FileNotFoundError:
+		pass
+	return f'http://127.0.0.1:{port}'
+
+
+def _parse_var(raw: str) -> tuple[str, Any]:
+	"""``name=value``; значение — JSON, если парсится, иначе строка как есть."""
+	import json
+
+	if '=' not in raw:
+		raise ValueError(f'--var expects name=value, got {raw!r}')
+	name, value = raw.split('=', 1)
+	name = name.strip()
+	if not name:
+		raise ValueError(f'--var expects a name before "=", got {raw!r}')
+	try:
+		return name, json.loads(value)
+	except Exception:
+		return name, value
+
+
+async def _cli_run(args: Any) -> int:
+	import json
+
+	from browser_use.browser import BrowserProfile, BrowserSession
+	from browser_use.browser.events import CloseTabEvent
+	from browser_use.browser.session import create_target_params
+
+	journal_mod = importlib.import_module('bu_mcp.journal')
+	try:
+		macro = journal_mod.load_macro(args.name)
+	except FileNotFoundError:
+		print(f'no macro named {args.name!r} in {journal_mod.home() / "macros"}; see `list`', file=sys.stderr)
+		return 2
+	try:
+		values = dict(_parse_var(v) for v in (args.var or []))
+	except ValueError as exc:
+		print(str(exc), file=sys.stderr)
+		return 2
+
+	url = cdp_url(args.cdp, profile=args.profile)
+	session = BrowserSession(browser_profile=BrowserProfile(cdp_url=url, is_local=True))
+	try:
+		await session.start()
+	except Exception as exc:
+		print(
+			f'cannot connect to Chrome at {url}: {type(exc).__name__}: {exc}\n'
+			f'start it first: scripts/chrome-automation.sh start' + (f' --profile {args.profile}' if args.profile else ''),
+			file=sys.stderr,
+		)
+		return 3
+
+	tab: str | None = None
+	report: dict[str, Any]
+	try:
+		# Своя вкладка, в фоне (create_target_params ставит background=True —
+		# окно не выносится вперёд). Чужие вкладки не трогаем.
+		created = await session.cdp_client.send.Target.createTarget(params=create_target_params({'url': 'about:blank'}))
+		tab = str(created['targetId'])
+		await session.get_or_create_cdp_session(tab, focus=True)
+		report = await run(
+			session,
+			macro,
+			vars=values,
+			strict=not args.no_strict,
+			from_step=args.from_step,
+			step_timeout=args.timeout,
+		)
+	finally:
+		if tab and not args.keep_tab:
+			try:
+				await session.event_bus.dispatch(CloseTabEvent(target_id=tab))
+			except Exception as exc:
+				print(f'could not close tab {tab}: {exc}', file=sys.stderr)
+		try:
+			await session.stop()
+		except Exception:
+			pass
+
+	if args.json:
+		print(json.dumps(report, ensure_ascii=False, indent=2))
+	else:
+		_print_report(macro, report, tab if args.keep_tab else None)
+	return 0 if report.get('ok') else 1
+
+
+def _print_report(macro: dict[str, Any], report: dict[str, Any], kept_tab: str | None) -> None:
+	total = len(macro.get('steps') or [])
+	head = f'macro {report.get("name")!r}: {total} step(s)'
+	if report.get('from_step'):
+		head += f', from step {report["from_step"]}'
+	print(head)
+	for st in report.get('steps') or []:
+		res = st.get('resolution') or {}
+		extra = ''
+		if res.get('level'):
+			extra = f'  via {res["level"]}'
+		cp = st.get('checkpoint')
+		if cp:
+			extra = f'  waited {cp.get("waited")}s'
+			if cp.get('snippet'):
+				extra += f'  «{str(cp["snippet"])[:80]}»'
+		print(f'  [{st.get("n")}] {str(st.get("tool")):<16} {str(st.get("status")):<8} {st.get("elapsed", 0):>6.2f}s{extra}')
+		if st.get('error'):
+			print(f'      {str(st["error"])[:400]}')
+	for w in report.get('warnings') or []:
+		print(f'  ! {w}')
+	if report.get('ok'):
+		print(f'OK: {len(report.get("steps") or [])} step(s) verified in {report.get("elapsed")}s')
+	else:
+		print(f'FAILED at step {report.get("failed_at")}: {str(report.get("error"))[:600]}')
+	if kept_tab:
+		print(f'tab kept open: {kept_tab}')
+
+
+def _cli(argv: list[str]) -> int:
+	import argparse
+	import json
+
+	parser = argparse.ArgumentParser(
+		prog='python -m bu_mcp.macro',
+		description='Replay a recorded macro against the automation Chrome, no model in the loop.',
+	)
+	sub = parser.add_subparsers(dest='cmd', required=True)
+
+	p_run = sub.add_parser('run', help='replay a macro in its own background tab')
+	p_run.add_argument('name')
+	p_run.add_argument('--var', action='append', metavar='NAME=VALUE', help='override a macro variable (repeatable)')
+	p_run.add_argument('--no-strict', action='store_true', help='run to the end collecting every mismatch')
+	p_run.add_argument('--from', dest='from_step', type=int, default=1, metavar='N', help='start at step N')
+	p_run.add_argument('--timeout', type=float, default=DEFAULT_STEP_TIMEOUT, help='per-step budget, seconds')
+	p_run.add_argument('--keep-tab', action='store_true', help='leave the tab open after the run')
+	p_run.add_argument('--cdp', help='CDP URL (default: BU_MCP_CDP_URL or the profile port from the registry)')
+	p_run.add_argument('--profile', help='automation profile name (default: BU_PROFILE or "default")')
+	p_run.add_argument('--json', action='store_true', help='print the full report as JSON')
+
+	sub.add_parser('list', help='saved macros')
+	p_show = sub.add_parser('show', help='print a macro')
+	p_show.add_argument('name')
+	sub.add_parser('selfcheck', help='live self-check against the automation Chrome')
+
+	args = parser.parse_args(argv)
+	journal_mod = importlib.import_module('bu_mcp.journal')
+
+	if args.cmd == 'list':
+		names = journal_mod.list_macros()
+		if not names:
+			print(f'no macros in {journal_mod.home() / "macros"}')
+			return 0
+		for name in names:
+			try:
+				m = journal_mod.load_macro(name)
+				steps = m.get('steps') or []
+				needed = [k for k, v in (m.get('vars') or {}).items() if isinstance(v, dict) and v.get('required')]
+				print(
+					f'{name:<32} {len(steps):>3} step(s)  {[s.get("tool") for s in steps]}'
+					+ (f'  needs {needed}' if needed else '')
+				)
+			except Exception as exc:
+				print(f'{name:<32} unreadable: {exc}')
+		return 0
+	if args.cmd == 'show':
+		try:
+			print(json.dumps(journal_mod.load_macro(args.name), ensure_ascii=False, indent=2))
+		except FileNotFoundError:
+			print(f'no macro named {args.name!r}', file=sys.stderr)
+			return 2
+		return 0
+	if args.cmd == 'run':
+		return asyncio.run(_cli_run(args))
+	return _selfcheck()
+
+
+# --------------------------------------------------------------------------- #
 # Самопроверка на живом Chrome
 # --------------------------------------------------------------------------- #
 
-if __name__ == '__main__':
+
+def _selfcheck() -> int:
 	import json
 	import os
-	import sys
 	import tempfile
 	import threading
 	from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -1372,6 +1802,130 @@ document.getElementById('add').addEventListener('click', function () {
 				failures += 1
 				fail(f'start_url не параметризован: {list(nav_macro["vars"])}')
 
+			# =============================================================== #
+			head('10. Чекпоинт: записан как шаг, при повторе ждёт условие и ловит его отсутствие')
+			journal_mod.reset(session_id='macro-selfcheck-cp')
+			await reload()
+			await do('browser_type', 'item', {'text': 'Sunset chair', 'clear': True})
+			await do('browser_click', 'add', {})
+			# Чекпоинт при обучении: та же функция, что и при повторе.
+			verdict = await checkpoint(session, {'text': 'Added: Sunset chair', 'timeout': 3})
+			journal_mod.record(
+				{
+					'tool': 'checkpoint',
+					'params': {'text': 'Added: Sunset chair', 'timeout': 3},
+					'url_before': base,
+					'url_after': base,
+				}
+			)
+			# Ложный чекпоинт при обучении: он выкидывается из макроса как ошибка.
+			try:
+				await checkpoint(session, {'text': 'no such text', 'timeout': 0.3})
+				failures += 1
+				fail('чекпоинт на отсутствующий текст не упал')
+			except StepFailed as exc:
+				journal_mod.record(
+					{'tool': 'checkpoint', 'params': {'text': 'no such text'}, 'outcome': 'error', 'error': str(exc)}
+				)
+				ok(f'чекпоинт на отсутствующий текст падает за свой таймаут ({str(exc)[:60]}...)')
+			cp_macro = journal_mod.to_macro(journal_mod.read(), name='cp-macro')
+			tools_kept = [st['tool'] for st in cp_macro['steps']]
+			print(f'  макрос: {tools_kept}, чекпоинт при записи ждал {verdict.get("waited")}s')
+			if (
+				tools_kept == ['browser_type', 'browser_click', 'checkpoint']
+				and cp_macro['steps'][-1]['params'].get('timeout') == 3
+			):
+				ok('удавшийся чекпоинт стал шагом (с таймаутом), провалившийся выкинут')
+			else:
+				failures += 1
+				fail(f'состав макроса с чекпоинтом: {tools_kept} / {cp_macro["steps"][-1]["params"]}')
+
+			await reload()
+			result = await run(session, cp_macro, strict=True)
+			cp_step = next((st for st in result['steps'] if st['tool'] == 'checkpoint'), {})
+			print(f'  run -> ok={result["ok"]} чекпоинт: {cp_step.get("status")} {cp_step.get("checkpoint")}')
+			if (
+				result['ok']
+				and cp_step.get('status') == 'ok'
+				and 'Sunset chair' in str(cp_step.get('checkpoint', {}).get('snippet'))
+			):
+				ok('при повторе чекпоинт выполнен как шаг и отдал фрагмент страницы')
+			else:
+				failures += 1
+				fail(f'чекпоинт при повторе: {result.get("error")} {cp_step}')
+
+			await reload()
+			await js('(() => { window.__inert = true; return 1; })()')
+			result = await run(session, cp_macro, strict=True)
+			print(f'  run (кнопка молчит) -> ok={result["ok"]} failed_at={result["failed_at"]}')
+			# Кликовая дельта поймает это раньше чекпоинта (шаг 2), и это правильно;
+			# чекпоинт же — страховка для страниц, где дельта клика есть, а результата нет.
+			if not result['ok'] and result['failed_at'] in (2, 3):
+				ok(f'без результата повтор остановился на шаге {result["failed_at"]}, до конца не дошёл')
+			else:
+				failures += 1
+				fail(f'повтор без результата не остановлен: {result}')
+			await js('(() => { window.__inert = false; return 1; })()')
+
+			# =============================================================== #
+			head('11. from_step: хвост сценария при уже готовом состоянии')
+			await reload()
+			await js("(() => { document.getElementById('item').value = 'Sunset chair'; return 1; })()")
+			result = await run(session, cp_macro, strict=True, from_step=2)
+			ran = [st['n'] for st in result['steps']]
+			print(f'  run(from_step=2) -> ok={result["ok"]} шаги {ran}')
+			if result['ok'] and ran == [2, 3] and result.get('from_step') == 2:
+				ok('выполнены только шаги 2..3')
+			else:
+				failures += 1
+				fail(f'from_step: {result.get("error")} шаги={ran}')
+
+			# =============================================================== #
+			head('12. auto_start: сценарий, записанный «с середины», из чужой страницы')
+			await session.navigate_to(base + '?elsewhere=1')
+			# Другой path — «другая страница»; query-отличие считалось бы той же.
+			cp_macro_far = json.loads(json.dumps(cp_macro))
+			for st in cp_macro_far['steps']:
+				st['url_before'] = base
+			await session.navigate_to(base.replace('/order.html', '/other.html'))
+			print(f'  стоим на {await where()}')
+			result = await run(session, cp_macro_far, strict=True)
+			print(f'  run -> ok={result["ok"]} auto_start={result.get("auto_start")} url={await where()}')
+			if result['ok'] and result.get('auto_start') == base and (await where()) == base:
+				ok('повтор сам открыл страницу записи и прошёл сценарий')
+			else:
+				failures += 1
+				fail(f'auto_start: {result.get("error")} {result.get("warnings")}')
+
+			# =============================================================== #
+			head('13. merge_macro: починка с шага N')
+			patch = journal_mod.to_macro(
+				[e for e in journal_mod.read() if e.get('tool') == 'checkpoint' and e.get('outcome', 'ok') == 'ok'],
+				name='cp-macro',
+			)
+			merged = journal_mod.merge_macro(cp_macro, patch, at=3)
+			tools_merged = [st['tool'] for st in merged['steps']]
+			ns = [st['n'] for st in merged['steps']]
+			print(f'  base {tools_kept} + patch {[st["tool"] for st in patch["steps"]]} @3 -> {tools_merged} n={ns}')
+			if (
+				tools_merged == ['browser_type', 'browser_click', 'checkpoint']
+				and ns == [1, 2, 3]
+				and merged['source']['replaced_from'] == 3
+			):
+				ok('шаги 1..2 сохранены, хвост заменён, нумерация сквозная')
+			else:
+				failures += 1
+				fail(f'merge_macro: {tools_merged} {ns}')
+			clash = json.loads(json.dumps(patch))
+			clash['vars'] = {'item_name': {'value': 'Other chair', 'secret': False, 'source': 'x'}}
+			clash['steps'][0]['params']['text'] = {'$var': 'item_name'}
+			merged2 = journal_mod.merge_macro(cp_macro, clash, at=3)
+			if 'item_name_2' in merged2['vars'] and merged2['steps'][-1]['params']['text'] == {'$var': 'item_name_2'}:
+				ok('одноимённая переменная с другим значением переименована вместе со ссылками')
+			else:
+				failures += 1
+				fail(f'merge_macro vars: {merged2["vars"]} {merged2["steps"][-1]["params"]}')
+
 		finally:
 			head('cleanup')
 			try:
@@ -1393,4 +1947,8 @@ document.getElementById('add').addEventListener('click', function () {
 		head(f'ИТОГ: {"всё зелено" if failures == 0 else f"{failures} провал(ов)"}')
 		return 1 if failures else 0
 
-	sys.exit(asyncio.run(main()))
+	return asyncio.run(main())
+
+
+if __name__ == '__main__':
+	sys.exit(_cli(sys.argv[1:]))
