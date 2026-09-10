@@ -10,22 +10,29 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel
 
+#: Схема результата конкретной задачи. verify/summary привязаны к ней же, а не к
+#: голому BaseModel — иначе типы этих колбэков не сходятся с их реальной сигнатурой.
+T = TypeVar('T', bound=BaseModel)
+
 
 @dataclass(frozen=True)
-class Task:
+class Task(Generic[T]):
 	name: str
 	prompt: str
-	schema: type[BaseModel]
-	verify: Callable[[BaseModel], list[str]]
+	schema: type[T]
+	verify: Callable[[T], list[str]]
 	"""Возвращает список нарушений. Пустой список = результат сошёлся с эталоном."""
 	profile: str = 'extract'
 	max_steps: int = 20
-	summary: Callable[[BaseModel], str] | None = None
-	setup: Callable[[], None] | None = None
-	"""Подготовка перед прогоном: поднять локальный сервер, сгенерировать фикстуру."""
+	summary: Callable[[T], str] | None = None
+	setup: Callable[[], object] | None = None
+	"""Подготовка перед прогоном: поднять локальный сервер, сгенерировать фикстуру.
+	Возвращаемое значение раннер игнорирует (`object`, а не `None`) — некоторые
+	`setup` также вызываются напрямую ради своего результата (см. `clickgate.setup`)."""
 	script: Callable | None = None
 	"""Записанное решение задачи БЕЗ модели: `async script(call) -> BaseModel | None`,
     где `call(имя, аргументы)` — вызов MCP-инструмента.
@@ -39,21 +46,21 @@ class Task:
 	note: str = ''
 
 
-_REGISTRY: dict[str, Task] = {}
+_REGISTRY: dict[str, Task[Any]] = {}
 
 
-def register(task: Task) -> Task:
+def register(task: Task[Any]) -> Task[Any]:
 	_REGISTRY[task.name] = task
 	return task
 
 
-def all_tasks() -> dict[str, Task]:
+def all_tasks() -> dict[str, Task[Any]]:
 	if not _REGISTRY:
 		from bu_eval import tasks  # noqa: F401  — импорт наполняет реестр
 	return _REGISTRY
 
 
-def get(name: str) -> Task:
+def get(name: str) -> Task[Any]:
 	t = all_tasks().get(name)
 	if not t:
 		raise KeyError(f'Нет задачи {name!r}. Есть: {", ".join(sorted(all_tasks()))}')

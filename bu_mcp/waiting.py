@@ -781,6 +781,7 @@ async def _selfcheck() -> int:
 		my_tab = session.agent_focus_target_id
 		if my_tab in pre_existing:
 			raise RuntimeError('не удалось открыть свою вкладку — отказываюсь трогать чужие')
+		assert my_tab is not None  # NavigateToUrlEvent(new_tab=True) выше либо даёт вкладку, либо кидает исключение
 		print(f'own tab: {my_tab[:12]}...')
 
 		# --- 1. статика ------------------------------------------------------

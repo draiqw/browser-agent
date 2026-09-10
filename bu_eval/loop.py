@@ -26,7 +26,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, cast
 
 from pydantic import BaseModel, ValidationError
 
@@ -152,6 +152,8 @@ async def run_openai(
 	max_output_tokens: int = 32000,
 ) -> Trace:
 	from openai import AsyncOpenAI
+	from openai.types.chat import ChatCompletionMessageParam, ChatCompletionToolUnionParam
+	from openai.types.chat.chat_completion_message_function_tool_call import ChatCompletionMessageFunctionToolCall
 
 	client = AsyncOpenAI(base_url=base_url)
 	tools = [
@@ -166,8 +168,10 @@ async def run_openai(
 		try:
 			resp = await client.chat.completions.create(
 				model=model,
-				messages=messages,
-				tools=tools,
+				# messages/tools собираются вручную из dict, а не из TypedDict-конструкторов SDK —
+				# структура верна по контракту API, cast нужен только чтобы это подтвердить pyright
+				messages=cast(list[ChatCompletionMessageParam], messages),
+				tools=cast(list[ChatCompletionToolUnionParam], tools),
 				max_completion_tokens=max_output_tokens,
 			)
 		except Exception as exc:  # — сбой провайдера это результат прогона, а не крах бенчмарка
@@ -192,6 +196,9 @@ async def run_openai(
 
 		finish: _Finish | None = None
 		for c in calls:
+			# мы объявляем инструменты только с type='function', поэтому custom-вызовов не бывает;
+			# если модель всё же вернёт такой, c.function ниже упадёт с тем же AttributeError, что и раньше
+			c = cast(ChatCompletionMessageFunctionToolCall, c)
 			try:
 				args = json.loads(c.function.arguments or '{}')
 			except json.JSONDecodeError:
@@ -231,6 +238,8 @@ async def run_anthropic(
 	max_output_tokens: int = 8000,
 ) -> Trace:
 	from anthropic import AsyncAnthropic
+	from anthropic.types import MessageParam, ToolParam
+	from anthropic.types.tool_use_block import ToolUseBlock
 
 	client = AsyncAnthropic(base_url=base_url) if base_url else AsyncAnthropic()
 	tools = [{'name': s.name, 'description': s.description, 'input_schema': s.schema} for s in specs]
@@ -245,8 +254,10 @@ async def run_anthropic(
 				model=model,
 				max_tokens=max_output_tokens,
 				system=SYSTEM,
-				tools=tools,
-				messages=messages,
+				# messages/tools собираются вручную из dict — структура верна по контракту API,
+				# cast нужен только чтобы это подтвердить pyright
+				tools=cast(list[ToolParam], tools),
+				messages=cast(list[MessageParam], messages),
 			)
 		except Exception as exc:
 			tr.errors.append(f'провайдер: {exc!r}')
@@ -258,7 +269,7 @@ async def run_anthropic(
 		tr.tok_cached += getattr(u, 'cache_read_input_tokens', 0) or 0
 		tr.tok_out += getattr(u, 'output_tokens', 0) or 0
 
-		blocks = [b for b in resp.content if getattr(b, 'type', '') == 'tool_use']
+		blocks = [b for b in resp.content if isinstance(b, ToolUseBlock)]
 		messages.append({'role': 'assistant', 'content': resp.content})
 		if not blocks:
 			tr.stopped = 'no_tool_call'

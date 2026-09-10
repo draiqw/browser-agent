@@ -38,6 +38,7 @@ def prices(refresh: bool = False) -> dict:
 	if fresh_enough and not refresh:
 		try:
 			_MEM = json.loads(CACHE.read_text())
+			assert isinstance(_MEM, dict)  # реестр litellm -- всегда JSON-объект
 			return _MEM
 		except Exception:  # — битый кэш не повод падать, перекачаем
 			pass
@@ -49,6 +50,7 @@ def prices(refresh: bool = False) -> dict:
 	except Exception:
 		# сети нет — лучше просроченный кэш, чем ничего
 		_MEM = json.loads(CACHE.read_text()) if CACHE.exists() else {}
+	assert isinstance(_MEM, dict)  # реестр litellm -- всегда JSON-объект
 	return _MEM
 
 

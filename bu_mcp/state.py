@@ -910,7 +910,8 @@ async def _selfcheck() -> int:
 	# pretty and the compact shape server.py can emit the envelope in.
 	_probe = 'https://x.test/probe'
 	_costs = {}
-	for _name, _kw in (('pretty', {'indent': 2}), ('compact', {'separators': (',', ':')})):
+	_variants: list[tuple[str, dict[str, Any]]] = [('pretty', {'indent': 2}), ('compact', {'separators': (',', ':')})]
+	for _name, _kw in _variants:
 		_empty = len(json.dumps({'href_map': {}}, ensure_ascii=False, **_kw))
 		_one = len(json.dumps({'href_map': {_href_placeholder(_probe): _probe}}, ensure_ascii=False, **_kw))
 		_costs[_name] = _one - _empty - len(_probe)

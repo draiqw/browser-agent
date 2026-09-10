@@ -32,7 +32,13 @@ class Rates(BaseModel):
 _GT: tuple[str, dict[str, tuple[int, float]]] | None = None
 
 
-def ground_truth(refresh: bool = False):
+def _text(el: ET.Element | None) -> str:
+	"""Узлы CharCode/Nominal/Value в XML ЦБ всегда содержат текст; иначе документ сломан."""
+	assert el is not None and el.text is not None
+	return el.text
+
+
+def ground_truth(refresh: bool = False) -> tuple[str, dict[str, tuple[int, float]]]:
 	"""Эталон из официального XML ЦБ."""
 	global _GT
 	if _GT is not None and not refresh:
@@ -45,7 +51,7 @@ def ground_truth(refresh: bool = False):
 	_GT = (
 		root.attrib['Date'],
 		{
-			v.find('CharCode').text: (int(v.find('Nominal').text), float(v.find('Value').text.replace(',', '.')))
+			_text(v.find('CharCode')): (int(_text(v.find('Nominal'))), float(_text(v.find('Value')).replace(',', '.')))
 			for v in root.findall('Valute')
 		},
 	)

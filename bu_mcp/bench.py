@@ -53,7 +53,7 @@ import urllib.request
 import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 import websockets
 
@@ -823,6 +823,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 			print(f'[bench] starting {key} ...', file=sys.stderr)
 			await b.bind(set(foreign_pages))
 			bounds[key] = b
+			assert b.target_id  # bind() либо заполняет target_id, либо кидает McpError
 			print(f'[bench] {key} bound to own tab {b.target_id[:8]}', file=sys.stderr)
 
 		# warm-up: pay the first-DOM-build cost outside the measurements
@@ -838,6 +839,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 					b = bounds[key]
 					done += 1
 					t0 = time.monotonic()
+					rec: dict[str, Any]
 					try:
 						rec = await measure_once(b, url)
 					except Exception as exc:
@@ -860,6 +862,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 				results['stale'][skey] = {}
 				for key in ('stock', 'ours'):
 					b = bounds[key]
+					res: dict[str, Any]
 					try:
 						await b.client.call(b.spec.tool_navigate, {'url': url})
 						res = await stale_test(b, skey)
@@ -993,9 +996,9 @@ def _detail_bucket(detail: str) -> str:
 	return detail[:60]
 
 
-def med(vals: list[float]) -> float | None:
-	vals = [v for v in vals if v is not None]
-	return round(statistics.median(vals), 2) if vals else None
+def med(vals: list[float | None]) -> float | None:
+	nums = [v for v in vals if v is not None]
+	return round(statistics.median(nums), 2) if nums else None
 
 
 def aggregate(results: dict[str, Any]) -> dict[str, Any]:
@@ -1005,12 +1008,13 @@ def aggregate(results: dict[str, Any]) -> dict[str, Any]:
 
 	agg: dict[str, Any] = {}
 	for (site, server), runs in by.items():
-		dom = _dominant([r.get('outcome') for r in runs])
+		# 'outcome' всегда есть -- и в rec из measure_once, и в except-ветке run(); cast честен
+		dom = _dominant(cast(list[str], [r.get('outcome') for r in runs]))
 		good = [r for r in runs if r.get('outcome') == dom and r.get('chars')]
 		if not good:
 			good = [r for r in runs if r.get('outcome') in ('ok', 'blocked', 'empty') and r.get('chars')]
 		entry = {
-			'outcomes': sorted({r.get('outcome') for r in runs}),
+			'outcomes': sorted(cast(set[str], {r.get('outcome') for r in runs})),
 			'outcome': dom,
 			'n': len(runs),
 			'chars': med([r.get('chars') for r in good]),
@@ -1315,14 +1319,16 @@ def build_report(results: dict[str, Any]) -> str:
 		A('| site | n | stock total | skeleton | href | text | meta | ours total | tree | json-escape | href_map | meta |')
 		A('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
 		for skey in sites:
-			c = comp.get(skey) or {}
-			a = c.get('stock') or {}
-			b = c.get('ours') or {}
+			# отдельные от `c`/`a`/`b` ниже по функции имена: там `c` объявлена как
+			# dict[str, int], и pyright унифицирует тип имени на всю область функции
+			pair = comp.get(skey) or {}
+			stock_c = pair.get('stock') or {}
+			ours_c = pair.get('ours') or {}
 			A(
-				f'| {skey} | {fmt(a.get("n"))}/{fmt(b.get("n"))} | {fmt(a.get("total"))} | {fmt(a.get("json_skeleton"))} '
-				f'| {fmt(a.get("href_inline"))} | {fmt(a.get("text_inline"))} | {fmt(a.get("metadata"))} '
-				f'| {fmt(b.get("total"))} | {fmt(b.get("tree_raw"))} | {fmt(b.get("json_escape"))} '
-				f'| {fmt(b.get("href_map"))} | {fmt(b.get("metadata"))} |'
+				f'| {skey} | {fmt(stock_c.get("n"))}/{fmt(ours_c.get("n"))} | {fmt(stock_c.get("total"))} | {fmt(stock_c.get("json_skeleton"))} '
+				f'| {fmt(stock_c.get("href_inline"))} | {fmt(stock_c.get("text_inline"))} | {fmt(stock_c.get("metadata"))} '
+				f'| {fmt(ours_c.get("total"))} | {fmt(ours_c.get("tree_raw"))} | {fmt(ours_c.get("json_escape"))} '
+				f'| {fmt(ours_c.get("href_map"))} | {fmt(ours_c.get("metadata"))} |'
 			)
 		A('')
 		A('Three separate effects fall out of this table, and together they explain every row of the')

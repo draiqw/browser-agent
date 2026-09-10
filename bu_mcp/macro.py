@@ -45,7 +45,7 @@ import importlib
 import logging
 import re
 import time
-from typing import Any
+from typing import Any, cast
 
 logger = logging.getLogger(__name__)
 
@@ -1230,7 +1230,8 @@ document.getElementById('add').addEventListener('click', function () {
 
 			levels = {(s.get('resolution') or {}).get('level') for s in result['steps'] if s.get('resolution')}
 			if result['ok'] and receipt == 'Added: Sunset chair (Large)':
-				ok(f'макрос отработал целиком через переидентификацию (ступени: {sorted(levels - {None})})')
+				# `- {None}` уже убрал None из множества, cast лишь подтверждает это pyright
+				ok(f'макрос отработал целиком через переидентификацию (ступени: {sorted(cast(set[str], levels - {None}))})')
 			else:
 				failures += 1
 				fail(f'макрос не доехал: ok={result["ok"]} receipt={receipt!r}')

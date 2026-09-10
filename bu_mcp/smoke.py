@@ -564,16 +564,22 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 	open_ = open_ or (lambda *a, **k: {})
 	outcome = outcome or (lambda *a, **k: None)
 	if write is None:
-
-		def write(_entry):  # — заглушка обязана падать, иначе тесты изоляции пройдут вхолостую
+		# заглушка обязана падать, иначе тесты изоляции пройдут вхолостую;
+		# имя функции не 'write', чтобы pyright не унифицировал его тип с
+		# типом более ранней "write = getattr(...)" на всю область функции
+		def _write_missing(_entry):
 			raise AssertionError('_journal_write is missing from the server')
+
+		write = _write_missing
 
 	macro_urls = macro_urls or (lambda *a, **k: [])
 	summary = summary or (lambda *a, **k: {})
 	if macro_name is None:
 
-		def macro_name(_raw):
+		def _macro_name_missing(_raw):
 			return '<no _macro_name>'
+
+		macro_name = _macro_name_missing
 
 	fields = getattr(sys.modules[BuMcpServer.__module__], 'JOURNAL_FIELDS', ())
 	journalled = getattr(sys.modules[BuMcpServer.__module__], 'JOURNALED_TOOLS', frozenset())
@@ -625,7 +631,9 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 	try:
 		captured: list = []
 		good = _types.ModuleType('bu_mcp.journal')
-		good.record = lambda e: captured.append(e)
+		# ModuleType в стабах не объявляет 'record' -- модуль это просто namespace,
+		# и рантайм разрешает произвольные атрибуты; setattr обходит стаб честно
+		setattr(good, 'record', lambda e: captured.append(e))
 		sys.modules['bu_mcp.journal'] = good
 		e = open_('browser_type', {'index': 3, 'text': 'x'})
 		try:
@@ -642,7 +650,7 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		def _boom(_entry):
 			raise RuntimeError('journal disk on fire')
 
-		broken.record = _boom
+		setattr(broken, 'record', _boom)
 		sys.modules['bu_mcp.journal'] = broken
 		try:
 			write(open_('browser_click', {'index': 1}))
@@ -651,7 +659,9 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		else:
 			ok('journal: a failing journal.record does not break the action')
 
-		sys.modules['bu_mcp.journal'] = None  # importlib -> ImportError
+		# None -- специальный сигнал importlib "модуль не найден" (см. доку import
+		# system); стаб sys.modules этого не знает, отсюда обоснованный ignore
+		sys.modules['bu_mcp.journal'] = None  # pyright: ignore[reportArgumentType] — importlib -> ImportError
 		try:
 			write(open_('browser_click', {'index': 1}))
 		except Exception as exc:
@@ -1422,11 +1432,12 @@ async def journal_macro_checks(session) -> None:
 		# Цена журнала должна быть НИЖЕ цены дельты, к которой он пристёгнут.
 		# Сравниваются медианы по всем записям, а не один замер: обе величины
 		# субмиллисекундные, и одиночная проба на них шумит сильнее, чем разница.
-		paired = [
-			(float(r['cost_ms']), float((r.get('delta') or {}).get('cost_ms')))
-			for r in rows
-			if isinstance(r.get('cost_ms'), (int, float)) and isinstance((r.get('delta') or {}).get('cost_ms'), (int, float))
-		]
+		paired: list[tuple[float, float]] = []
+		for r in rows:
+			j_raw = r.get('cost_ms')
+			d_raw = (r.get('delta') or {}).get('cost_ms')
+			if isinstance(j_raw, (int, float)) and isinstance(d_raw, (int, float)):
+				paired.append((float(j_raw), float(d_raw)))
 		if paired:
 			j_med = statistics.median(c for c, _ in paired)
 			d_med = statistics.median(d for _, d in paired)
@@ -1436,7 +1447,7 @@ async def journal_macro_checks(session) -> None:
 			)
 		else:
 			j_med = d_med = None
-		if paired and j_med < d_med:
+		if paired and j_med is not None and d_med is not None and j_med < d_med:
 			ok('journalling costs less than the delta it rides along with', f'{j_med:.2f}ms < {d_med:.2f}ms')
 		else:
 			bad('journalling costs less than the delta it rides along with', f'journal={j_med} delta={d_med}')

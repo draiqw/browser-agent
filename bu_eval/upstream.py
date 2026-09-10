@@ -596,6 +596,7 @@ def check_headless_viewport_side_effect() -> Check:
 	elif not workaround_holds:
 		detail = 'ПОБОЧКА ЕСТЬ, а обход не применяется: поля viewport/no_viewport стали неизменяемыми'
 	else:
+		assert raw.viewport is not None  # мы здесь только когда side_effect истинен, а это и есть это условие
 		detail = f'viewport={raw.viewport.width}x{raw.viewport.height} снимается вручную, как и задумано'
 	return Check('bu_mcp', 'viewport-override при headless', ok, detail)
 

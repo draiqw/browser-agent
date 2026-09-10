@@ -551,8 +551,10 @@ def _expectation(entry: dict[str, Any]) -> dict[str, Any]:
 	Времена в ожидание НЕ идут: ``cost_ms``/``settle_ms`` — свойство машины и
 	сети, а не сценария.
 	"""
-	delta = entry.get('delta') if isinstance(entry.get('delta'), dict) else {}
-	fields = delta.get('fields') if isinstance(delta.get('fields'), dict) else {}
+	_delta = entry.get('delta')
+	delta: dict[str, Any] = _delta if isinstance(_delta, dict) else {}
+	_fields = delta.get('fields')
+	fields: dict[str, Any] = _fields if isinstance(_fields, dict) else {}
 	url_before, url_after = entry.get('url_before'), entry.get('url_after')
 
 	expect: dict[str, Any] = {}
