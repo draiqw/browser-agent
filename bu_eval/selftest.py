@@ -79,6 +79,17 @@ def t_never_steals_focus() -> Check:
 		if guarded < created:
 			bad.append(f'session.py: createTarget без предохранителя ({guarded} из {created})')
 
+	# Обратная сторона background=True: фоновая вкладка «не в фокусе», и Chrome
+	# не отдаёт ей ввод — текст в поле не появляется, клик не срабатывает.
+	# Лечится эмуляцией фокуса на каждой page-сессии, а не активацией окна.
+	manager = root.parent / 'browser_use' / 'browser' / 'session_manager.py'
+	if not manager.exists():
+		bad.append('browser_use/browser/session_manager.py пропал')
+	else:
+		m = manager.read_text(encoding='utf-8')
+		if 'Emulation.setFocusEmulationEnabled' not in m:
+			bad.append('session_manager.py: фоновая вкладка без эмуляции фокуса — ввод в неё теряется')
+
 	# Питон — не единственная дверь. Окно в прошлый раз пришло из шелл-скрипта.
 	launcher = root.parent / 'scripts' / 'chrome-automation.sh'
 	if not launcher.exists():

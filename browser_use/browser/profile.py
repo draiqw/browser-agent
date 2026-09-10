@@ -1261,7 +1261,17 @@ async function initialize(checkInitialized, magic) {{
 		# Determine viewport behavior based on mode and user preferences
 		user_provided_viewport = self.viewport is not None
 
-		if self.headless:
+		# Подключение к ЧУЖОМУ браузеру (cdp_url задан): его геометрия — не наша.
+		# Без этой ветки headless=True тянул viewport=screen / no_viewport=False, и
+		# browser-use слал Emulation.setDeviceMetricsOverride на каждую вкладку,
+		# которую создаёт или на которую переводит фокус, — включая вкладки
+		# владельца. Подчистить это после конструктора нельзя: BrowserSession
+		# пересобирает профиль через BrowserProfile(**model_dump()), и
+		# model_post_init вызывает эту функцию заново. Поэтому правило живёт
+		# здесь: при cdp_url override только по явному viewport пользователя.
+		attached = bool(self.cdp_url)
+
+		if self.headless and not attached:
 			# Headless mode: always use viewport for content size control
 			self.viewport = self.viewport or self.window_size or self.screen
 			self.window_position = None
@@ -1297,4 +1307,6 @@ async function initialize(checkInitialized, magic) {{
 			assert self.viewport is not None
 			assert self.no_viewport is False
 
-		assert not (self.headless and self.no_viewport), 'headless=True and no_viewport=True cannot both be set at the same time'
+		assert attached or not (self.headless and self.no_viewport), (
+			'headless=True and no_viewport=True cannot both be set at the same time'
+		)

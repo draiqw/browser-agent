@@ -10,7 +10,7 @@ from typing import Any
 
 from cdp_use.cdp.target import AttachedToTargetEvent, DetachedFromTargetEvent, SessionID, TargetID
 
-from browser_use.browser.session import BrowserSession, CDPSession, Target, _activation_allowed
+from browser_use.browser.session import BrowserSession, CDPSession, Target, _activation_allowed, _focus_emulation_wanted
 from browser_use.utils import create_task_with_error_handling
 
 
@@ -895,6 +895,21 @@ class SessionManager:
 
 			# Enable network monitoring for networkIdle detection
 			await cdp_session.cdp_client.send.Network.enable(session_id=cdp_session.session_id)
+
+			# Эмуляция фокуса. Вкладки мы создаём с `background: true` (см.
+			# session.create_target_params) и окно браузера спрятано, поэтому с точки
+			# зрения Chrome страница «не видна и не в фокусе»: Input.dispatchKeyEvent
+			# и dispatchMouseEvent до неё доходят, но текст в поле не появляется, а
+			# клик не срабатывает. Проверено на живом Chrome: без этого ввод в
+			# фоновую вкладку теряется целиком. С флагом страница считает себя
+			# сфокусированной (document.hasFocus() == true, visibilityState ==
+			# 'visible'), и ввод идёт как в активную. Ровно это делает Playwright на
+			# каждой странице. Альтернатива — Target.activateTarget — выносит окно
+			# вперёд и крадёт фокус у пользователя.
+			if _focus_emulation_wanted():
+				await cdp_session.cdp_client.send.Emulation.setFocusEmulationEnabled(
+					params={'enabled': True}, session_id=cdp_session.session_id
+				)
 
 			# Event storage and the Page.lifecycleEvent handler live in SessionManager
 			# (one global handler registered in start_monitoring, routed by session_id):

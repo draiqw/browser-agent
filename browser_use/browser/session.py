@@ -90,6 +90,20 @@ def _activation_allowed() -> bool:
 	return os.getenv('BU_ALLOW_ACTIVATE', '0').strip().lower() in ('1', 'true', 'yes', 'on')
 
 
+def _focus_emulation_wanted() -> bool:
+	"""Считать ли страницу сфокусированной, даже когда вкладка фоновая.
+
+	Обратная сторона `background=True` и спрятанного окна: Chrome не отдаёт
+	ввод странице, которая «не видна». Эмуляция фокуса
+	(`Emulation.setFocusEmulationEnabled`) снимает это, не трогая окно.
+	`BU_FOCUS_EMULATION=0` выключает — например, если браузер и так на экране
+	и хочется видеть настоящее поведение фокуса.
+	"""
+	import os
+
+	return os.getenv('BU_FOCUS_EMULATION', '1').strip().lower() not in ('0', 'false', 'no', 'off')
+
+
 def create_target_params(params: 'CreateTargetParameters') -> 'CreateTargetParameters':
 	"""Дописать `background=True` в параметры `Target.createTarget`.
 

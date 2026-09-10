@@ -313,6 +313,9 @@ async def main() -> int:
 			# --- 12. журнал и макросы -------------------------------------- #
 			await journal_macro_checks(session)
 
+			# --- 13. обучение -> скрипт: запись start/stop, чекпоинты, починка #
+			await teach_replay_checks(session)
+
 	await allowlist_check()
 	return report()
 
@@ -514,6 +517,22 @@ def headless_contract_checks(BuMcpServer) -> None:
 				f'headless={connected.headless} viewport={connected.viewport} no_viewport={connected.no_viewport}',
 			)
 
+		# Проверка на объекте профиля недостаточна: BrowserSession пересобирает
+		# профиль через BrowserProfile(**model_dump()), и model_post_init заново
+		# выводит геометрию. Именно так подчистка viewport в _profile отменялась
+		# молча, и сервер слал 2048x1332 override на каждую вкладку, включая
+		# чужие. Смотрим на то, с чем сессия РЕАЛЬНО пойдёт в браузер.
+		from browser_use.browser import BrowserSession
+
+		effective = BrowserSession(browser_profile=connected).browser_profile
+		if effective.viewport is None and effective.no_viewport is True:
+			ok('profile: the viewport stays untouched after BrowserSession rebuilds the profile')
+		else:
+			bad(
+				'profile: the viewport stays untouched after BrowserSession rebuilds the profile',
+				f'viewport={effective.viewport} no_viewport={effective.no_viewport} headless={effective.headless}',
+			)
+
 		launched = profile('')
 		if launched.headless is True and launched.viewport is not None and launched.no_viewport is False:
 			ok('profile: the launch path keeps its viewport')
@@ -607,6 +626,8 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		'select_dropdown',
 		'send_keys',
 		'scroll',
+		# Единственное наблюдение в журнале: при повторе оно — шаг-проверка.
+		'checkpoint',
 	}
 	if set(journalled) == expected_tools:
 		ok('journal: exactly the state-changing tools are journalled')
@@ -1587,6 +1608,254 @@ async def journal_macro_checks(session) -> None:
 			ok('journal run cleaned up its tabs', f'{closed}')
 		else:
 			bad('journal run cleaned up its tabs', f'{closed}/{len(mine)}')
+
+
+#: Та же страница, что MACRO_PAGE_JS, но кнопка другая: старый xpath/id/имя
+#: мертвы, значит записанный шаг клика воспроизвести нельзя — нужна починка.
+MACRO_PAGE_V2_JS = (
+	"(function(){document.body.innerHTML='';"
+	"var i=document.createElement('input');i.id='macroInput';i.setAttribute('aria-label','macro input');"
+	"var w=document.createElement('div');var b=document.createElement('button');b.id='macroBtnV2';"
+	"b.setAttribute('aria-label','macro button v2');b.textContent='GO';"
+	"b.onclick=function(){if(document.getElementById('macroDone'))return;"
+	"var p=document.createElement('p');p.id='macroDone';p.textContent='done';document.body.appendChild(p)};"
+	"w.appendChild(b);document.body.append(i,w);return 'built v2'})()"
+)
+TEACH_NAME = 'bu_mcp_teach'
+TEACH_TEXT = 'taught, then replayed'
+
+
+async def teach_replay_checks(session) -> None:
+	"""Обучение -> скрипт: macro_record start/stop, checkpoint как шаг, починка с шага N."""
+	print('\n[13] teach -> replay: macro_record, checkpoint, repair (replace_from / from_step)')
+	before = {t['tab_id'] for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])}
+	res = await session.call_tool('browser_navigate', {'url': 'https://example.com', 'new_tab': True})
+	if res.isError:
+		bad('teach run opened its own tab', text_of(res)[:160])
+		return
+	tabs = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
+	ours = {t['tab_id'] for t in tabs} - before
+	if not ours:
+		current = next((t['tab_id'] for t in tabs if t.get('current')), None)
+		if current:
+			ours = {current}
+	macro_file = None
+
+	async def ev(code: str) -> str:
+		return text_of(await session.call_tool('evaluate', {'code': code}))
+
+	async def fresh(page_js: str) -> None:
+		await session.call_tool('browser_navigate', {'url': 'https://example.com'})
+		await ev(page_js)
+
+	try:
+		await ev(MACRO_PAGE_JS)
+
+		# -- 1. start / status ---------------------------------------------- #
+		res = await session.call_tool('macro_record', {'action': 'status'})
+		if not res.isError and as_json(text_of(res)).get('recording') is None:
+			ok('macro_record status: nothing open before start')
+		else:
+			bad('macro_record status: nothing open before start', text_of(res)[:200])
+		res = await session.call_tool('macro_record', {'action': 'start', 'name': TEACH_NAME})
+		if not res.isError and as_json(text_of(res)).get('name') == TEACH_NAME:
+			ok('macro_record start opens a recording')
+		else:
+			bad('macro_record start opens a recording', text_of(res)[:300])
+			return
+		res = await session.call_tool('macro_record', {'action': 'start', 'name': 'bu_mcp_nested'})
+		if res.isError and 'already open' in text_of(res):
+			ok('a second start while one is open is refused, not silently nested')
+		else:
+			bad('a second start while one is open is refused, not silently nested', text_of(res)[:200])
+
+		# -- 2. обучение: ввод, клик, чекпоинт (+ заведомо ложный чекпоинт) --- #
+		type_index = await index_of(session, 'id=macroInput')
+		click_index = await index_of(session, 'id=macroBtn')
+		if type_index is None or click_index is None:
+			bad('teach page shows up in browser_state', f'input={type_index} button={click_index}')
+			return
+		r_type = await session.call_tool('browser_type', {'index': type_index, 'text': TEACH_TEXT})
+		probe = await ev(MACRO_PROBE_JS)
+		if f'value=[{TEACH_TEXT}]' not in probe:
+			r_type = await session.call_tool('browser_type', {'index': type_index, 'text': TEACH_TEXT})
+		r_click = await session.call_tool('browser_click', {'index': click_index})
+		if r_type.isError or r_click.isError:
+			bad('teach run typed and clicked', (text_of(r_type) + text_of(r_click))[:220])
+			return
+		res = await session.call_tool('checkpoint', {'text': 'done', 'note': 'the click must add the receipt'})
+		body = text_of(res)
+		if not res.isError and as_json(body).get('waited') is not None and 'done' in (as_json(body).get('snippet') or ''):
+			ok('checkpoint holds when the text is on the page', f'waited {as_json(body).get("waited")}s')
+		else:
+			bad('checkpoint holds when the text is on the page', body[:240])
+		res = await session.call_tool('checkpoint', {'text': 'this text is nowhere', 'timeout': 1})
+		body = text_of(res)
+		if res.isError and 'CHECKPOINT FAILED' in body:
+			ok('a checkpoint that does not hold is a hard error after its timeout')
+		else:
+			bad('a checkpoint that does not hold is a hard error after its timeout', body[:240])
+		res = await session.call_tool('checkpoint', {})
+		if res.isError and 'at least one of' in text_of(res):
+			ok('a checkpoint without a condition is refused')
+		else:
+			bad('a checkpoint without a condition is refused', text_of(res)[:200])
+		res = await session.call_tool('macro_record', {'action': 'status'})
+		status = as_json(text_of(res))
+		if (status.get('recording') or {}).get('name') == TEACH_NAME and (status.get('entries_so_far') or 0) >= 4:
+			ok('macro_record status counts the entries recorded so far', f'{status.get("entries_so_far")}')
+		else:
+			bad('macro_record status counts the entries recorded so far', text_of(res)[:200])
+
+		# -- 3. stop -> макрос ----------------------------------------------- #
+		res = await session.call_tool('macro_record', {'action': 'stop'})
+		body = text_of(res)
+		saved = as_json(body)
+		macro_file = saved.get('file')
+		print(f'  stop -> {saved.get("tools")} vars={sorted(saved.get("vars") or {})}')
+		if not res.isError and saved.get('tools') == ['browser_type', 'browser_click', 'checkpoint']:
+			ok('stop builds the macro from the recording: actions + the checkpoint that held, the failed one dropped')
+		else:
+			bad('stop builds the macro from the recording', body[:300])
+			return
+		res = await session.call_tool('macro_record', {'action': 'status'})
+		if as_json(text_of(res)).get('recording') is None:
+			ok('stop closes the recording')
+		else:
+			bad('stop closes the recording', text_of(res)[:200])
+
+		# -- 4. повтор на свежей странице, чекпоинт как шаг ------------------ #
+		await fresh(MACRO_PAGE_JS)
+		res = await session.call_tool('macro_run', {'name': TEACH_NAME})
+		body = text_of(res)
+		out = as_json(body)
+		steps = out.get('steps') or []
+		cp = next((s for s in steps if s.get('tool') == 'checkpoint'), {})
+		print(f'  macro_run -> isError={res.isError} steps={[(s.get("tool"), s.get("status")) for s in steps]}')
+		if not res.isError and out.get('ok') and len(steps) == 3 and cp.get('status') == 'ok' and cp.get('checkpoint'):
+			ok('the replay runs the checkpoint as a step and it holds', f'waited {cp["checkpoint"].get("waited")}s')
+		else:
+			bad('the replay runs the checkpoint as a step and it holds', body[:300])
+
+		# Чекпоинт при повторе ловит страницу, которая на клик ОТРЕАГИРОВАЛА (дельта
+		# есть, шаг клика проходит), но результата не дала. Молчащий обработчик
+		# здесь не годится: его поймала бы дельта клика ещё на шаге 2.
+		await fresh(MACRO_PAGE_JS)
+		await ev(
+			"(function(){document.getElementById('macroBtn').onclick=function(){"
+			"var p=document.createElement('p');p.id='macroBusy';p.textContent='working';document.body.appendChild(p)};"
+			"return 'busy'})()"
+		)
+		res = await session.call_tool('macro_run', {'name': TEACH_NAME})
+		body = text_of(res)
+		if res.isError and 'FAILED at step 3' in body and 'CHECKPOINT FAILED' in body:
+			ok('on replay a checkpoint that does not hold stops the macro at that step')
+		else:
+			bad('on replay a checkpoint that does not hold stops the macro at that step', body[:300])
+
+		# -- 5. страница изменилась -> повтор падает на шаге 2 --------------- #
+		await fresh(MACRO_PAGE_V2_JS)
+		res = await session.call_tool('macro_run', {'name': TEACH_NAME})
+		body = text_of(res)
+		if res.isError and 'FAILED at step 2' in body and 'replace_from=2' in body:
+			ok('a changed page fails the replay at the right step and the error says how to repair it')
+		else:
+			bad('a changed page fails the replay at the right step and the error says how to repair it', body[:300])
+
+		# -- 6. починка: переучить хвост, replace_from=2 ---------------------- #
+		res = await session.call_tool('macro_record', {'action': 'start', 'name': TEACH_NAME})
+		if res.isError:
+			bad('repair: recording restarts under the same name', text_of(res)[:200])
+			return
+		if as_json(text_of(res)).get('overwrites_existing') is True:
+			ok('repair: start warns that the macro already exists')
+		else:
+			bad('repair: start warns that the macro already exists', text_of(res)[:200])
+		click_v2 = await index_of(session, 'id=macroBtnV2')
+		if click_v2 is None:
+			bad('repair: the new button shows up in browser_state')
+			return
+		await session.call_tool('browser_click', {'index': click_v2})
+		await session.call_tool('checkpoint', {'text': 'done'})
+		res = await session.call_tool('macro_record', {'action': 'stop', 'replace_from': 2})
+		body = text_of(res)
+		saved = as_json(body)
+		print(f'  stop replace_from=2 -> {saved.get("tools")} repaired={saved.get("repaired")}')
+		if not res.isError and saved.get('tools') == ['browser_type', 'browser_click', 'checkpoint'] and saved.get('repaired'):
+			ok('repair: step 1 kept from the old macro, steps 2.. replaced by the new recording')
+		else:
+			bad('repair: step 1 kept from the old macro, steps 2.. replaced by the new recording', body[:300])
+		shown = as_json(text_of(await session.call_tool('macro_list', {'name': TEACH_NAME})))
+		hint = ((shown.get('macro') or {}).get('steps') or [{}, {}])[1].get('hint') or {}
+		if hint.get('accessible_name') == 'macro button v2':
+			ok('repair: the replaced step carries the handle of the NEW element')
+		else:
+			bad('repair: the replaced step carries the handle of the NEW element', json.dumps(hint)[:200])
+
+		await fresh(MACRO_PAGE_V2_JS)
+		res = await session.call_tool('macro_run', {'name': TEACH_NAME})
+		probe = await ev(MACRO_PROBE_JS)
+		if not res.isError and as_json(text_of(res)).get('ok') and f'value=[{TEACH_TEXT}]' in probe and 'done=yes' in probe:
+			ok('the repaired macro replays end to end on the changed page')
+		else:
+			bad('the repaired macro replays end to end on the changed page', (text_of(res) + ' | ' + probe)[:300])
+
+		# -- 7. from_step: продолжить с шага, состояние до него уже есть ------- #
+		await fresh(MACRO_PAGE_V2_JS)
+		await ev(
+			"(function(){var p=document.createElement('p');p.id='macroDone';p.textContent='done';document.body.appendChild(p);return 1})()"
+		)
+		res = await session.call_tool('macro_run', {'name': TEACH_NAME, 'from_step': 3})
+		out = as_json(text_of(res))
+		if (
+			not res.isError
+			and out.get('ok')
+			and [s.get('n') for s in out.get('steps') or []] == [3]
+			and out.get('from_step') == 3
+		):
+			ok('macro_run from_step runs only the tail')
+		else:
+			bad('macro_run from_step runs only the tail', text_of(res)[:300])
+		res = await session.call_tool('macro_run', {'name': TEACH_NAME, 'from_step': 99})
+		if res.isError and 'past the end' in text_of(res):
+			ok('macro_run from_step past the end is refused')
+		else:
+			bad('macro_run from_step past the end is refused', text_of(res)[:200])
+
+		# -- 8. new_tab + auto_start: свежая вкладка сама идёт на страницу записи #
+		tabs_before = {t['tab_id'] for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])}
+		res = await session.call_tool('macro_run', {'name': TEACH_NAME, 'new_tab': True})
+		body = text_of(res)
+		tabs_after = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
+		opened = [t for t in tabs_after if t['tab_id'] not in tabs_before]
+		ours |= {t['tab_id'] for t in opened}
+		# На example.com без нашей инъекции поля нет — шаг 1 обязан упасть, но
+		# ДО него повтор должен был сам открыть страницу записи.
+		if len(opened) == 1 and 'auto_start' in body and 'example.com' in (opened[0].get('url') or ''):
+			ok('macro_run new_tab opens its own tab and auto-starts on the recorded page', opened[0].get('url'))
+		else:
+			bad(
+				'macro_run new_tab opens its own tab and auto-starts on the recorded page',
+				f'{[t.get("url") for t in opened]} | {body[:200]}',
+			)
+
+	finally:
+		if macro_file:
+			try:
+				Path(macro_file).unlink()
+			except Exception as exc:
+				print(f'  cleanup: could not remove {macro_file}: {exc}')
+		tabs = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
+		mine = [t for t in tabs if t['tab_id'] in ours]
+		closed = 0
+		for tab in mine:
+			cl = await session.call_tool('close', {'tab_id': str(tab['tab_id'])})
+			closed += 0 if cl.isError else 1
+		print(f'  cleanup: closed {closed}/{len(mine)} of our tabs')
+		if mine and closed == len(mine):
+			ok('teach run cleaned up its tabs', f'{closed}')
+		else:
+			bad('teach run cleaned up its tabs', f'{closed}/{len(mine)}')
 
 
 async def index_of(session, needle: str) -> int | None:
