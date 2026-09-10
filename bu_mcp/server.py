@@ -121,6 +121,7 @@ import logging
 import re
 import tempfile
 import time
+from collections.abc import Sequence
 from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, NamedTuple
@@ -1296,7 +1297,7 @@ class BuMcpServer:
 
 	# --- browser_navigate -------------------------------------------------- #
 
-	async def _tool_browser_navigate(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_browser_navigate(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		waiting_mod = _bu_mcp('waiting')
 		session, tools = await self._ensure_session()
 		url = args['url']
@@ -1802,7 +1803,7 @@ class BuMcpServer:
 				'belongs to some other element. Scroll the element into view first, or resize the viewport.'
 			)
 
-		point = {'x': (vx0 + vx1) / 2.0, 'y': (vy0 + vy1) / 2.0}
+		point: dict[str, Any] = {'x': (vx0 + vx1) / 2.0, 'y': (vy0 + vy1) / 2.0}
 		# Второй mouseMoved — движение ВНУТРИ элемента, на пиксель в сторону, но не
 		# за пределы видимой части.
 		point['x2'] = min(vx1 - 0.5, point['x'] + 1.0)
@@ -1812,7 +1813,7 @@ class BuMcpServer:
 		point['clipped'] = bool(x < 0 or y < 0 or x + w > vw or y + h > vh)
 		return {'cdp': cdp_session, 'session_id': session_id, 'backend_node_id': backend_node_id, 'point': point}
 
-	async def _tool_browser_hover(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_browser_hover(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""Физическое наведение курсора на элемент.
 
 		Issue #4964. В реестре browser-use действия ``hover`` нет вообще, а обойти
@@ -1906,7 +1907,7 @@ class BuMcpServer:
 
 	# --- browser_click ----------------------------------------------------- #
 
-	async def _tool_browser_click(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_browser_click(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		waiting_mod = _bu_mcp('waiting')
 		session, tools = await self._ensure_session()
 		await self._check_domain_gate('click')
@@ -2051,7 +2052,7 @@ class BuMcpServer:
 
 	# --- browser_type ------------------------------------------------------ #
 
-	async def _tool_browser_type(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_browser_type(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		waiting_mod = _bu_mcp('waiting')
 		session, tools = await self._ensure_session()
 		await self._check_domain_gate('input')
@@ -2120,7 +2121,7 @@ class BuMcpServer:
 	#: любого mousePressed по фокусируемому узлу, сработал обработчик или нет.
 	DELTA_FOCUS_COUNTS = frozenset({'send_keys'})
 
-	async def _tool_registry_with_delta(self, name: str, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_registry_with_delta(self, name: str, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""``select_dropdown`` / ``send_keys``: реестровое действие + расписка о последствиях.
 
 		Схема у них остаётся реестровой (см. ``_build_tool_list``), подменяется
@@ -2167,7 +2168,9 @@ class BuMcpServer:
 			resolved = await cdp_session.cdp_client.send.DOM.resolveNode(
 				params={'backendNodeId': node.backend_node_id}, session_id=cdp_session.session_id
 			)
-			object_id = resolved['object']['objectId']
+			object_id = resolved['object'].get('objectId')
+			if object_id is None:
+				raise ValueError('resolveNode returned no objectId')
 			out = await cdp_session.cdp_client.send.Runtime.callFunctionOn(
 				params={'functionDeclaration': _SCROLL_TARGET_JS, 'objectId': object_id, 'returnByValue': True},
 				session_id=cdp_session.session_id,
@@ -2188,7 +2191,7 @@ class BuMcpServer:
 		bt, at = before.get('target') or {}, after.get('target') or {}
 		return bool(bt) and bool(at) and (bt.get('y'), bt.get('x')) != (at.get('y'), at.get('x'))
 
-	async def _tool_scroll(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_scroll(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""``scroll`` реестра + верификация фактом по scrollY/scrollX.
 
 		Зачем override. У ``scroll`` в browser_use/tools/service.py нет текста,
@@ -2226,7 +2229,7 @@ class BuMcpServer:
 		await self._journal_capture(session, scroll_target)
 		if scroll_target is not None:
 			try:
-				node = await session.get_element_by_index(int(index))
+				node = await session.get_element_by_index(int(scroll_target))
 			except Exception:
 				node = None
 
@@ -2284,8 +2287,10 @@ class BuMcpServer:
 		bp, ap = before['page'], after['page']
 		target_before, target_after = before.get('target'), after.get('target')
 		scope = 'element' if target_before and target_after else 'page'
-		ref_before = target_before if scope == 'element' else bp
-		ref_after = target_after if scope == 'element' else ap
+		# Условие продублировано (а не через scope), чтобы pyright сузил
+		# target_before/target_after до dict в истинной ветке тернарника.
+		ref_before: dict[str, Any] = target_before if target_before and target_after else bp
+		ref_after: dict[str, Any] = target_after if target_before and target_after else ap
 
 		delta_y = int(ref_after.get('y', 0)) - int(ref_before.get('y', 0))
 		delta_x = int(ref_after.get('x', 0)) - int(ref_before.get('x', 0))
@@ -2365,7 +2370,7 @@ class BuMcpServer:
 
 	# --- switch: проверка фактом ------------------------------------------- #
 
-	async def _tool_switch(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_switch(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""``switch`` реестра + сверка фактического фокуса.
 
 		Апстрим (browser_use/tools/service.py, ``switch``) берёт результат
@@ -2623,7 +2628,7 @@ class BuMcpServer:
 			raise ToolError(f'journal.read returned {type(entries).__name__}, expected a list of entries.')
 		return journal_mod, entries, path
 
-	async def _tool_journal_list(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_journal_list(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""Что записалось. Позиция ``i`` — абсолютная, её принимает ``macro_save(include=...)``."""
 		journal_mod, entries, path = self._journal_entries(args)
 		try:
@@ -2650,7 +2655,7 @@ class BuMcpServer:
 			compact=True,
 		)
 
-	async def _tool_macro_save(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_macro_save(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""Схлопнуть выбранные записи журнала в макрос и положить его на диск."""
 		name = self._macro_name(args.get('name'))
 		journal_mod, entries, _path = self._journal_entries(args)
@@ -2712,7 +2717,7 @@ class BuMcpServer:
 			compact=True,
 		)
 
-	async def _tool_macro_list(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_macro_list(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""Без имени — что сохранено; с именем — макрос целиком."""
 		directory = self._macro_dir()
 		if args.get('name'):
@@ -2751,7 +2756,7 @@ class BuMcpServer:
 			compact=True,
 		)
 
-	async def _tool_macro_run(self, args: dict[str, Any]) -> list[types.ContentBlock]:
+	async def _tool_macro_run(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""Прогнать сохранённый макрос. Провал шага — ЖЁСТКАЯ ошибка, а не отчёт.
 
 		``strict`` управляет только тем, останавливаться ли на первом расхождении
@@ -2817,7 +2822,7 @@ class BuMcpServer:
 				return raw, meta
 			scale = max_dim / longest
 			new_size = (max(1, round(width * scale)), max(1, round(height * scale)))
-			resized = img.convert('RGB').resize(new_size, Image.LANCZOS)
+			resized = img.convert('RGB').resize(new_size, Image.Resampling.LANCZOS)
 			buf = io.BytesIO()
 			resized.save(buf, format='PNG', optimize=True)
 			out = buf.getvalue()
@@ -2849,7 +2854,7 @@ class BuMcpServer:
 			return []
 
 		@self.server.call_tool()
-		async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> list[types.ContentBlock]:
+		async def handle_call_tool(name: str, arguments: dict[str, Any] | None) -> Sequence[types.ContentBlock]:
 			args = arguments or {}
 			overrides = {
 				'browser_state': self._tool_browser_state,
