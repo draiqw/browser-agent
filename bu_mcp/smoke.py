@@ -18,6 +18,7 @@ import re
 import statistics
 import sys
 from pathlib import Path
+from typing import Any, cast
 
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -464,6 +465,79 @@ def contract_checks() -> None:
 	delta_contract_checks(BuMcpServer, ToolError)
 	headless_contract_checks(BuMcpServer)
 	journal_contract_checks(BuMcpServer, ToolError)
+	replay_tolerance_checks()
+
+
+def replay_tolerance_checks() -> None:
+	"""Чистые проверки терпимости повтора: динамические URL и подмена тега поля.
+
+	Обе появились из-за ChatGPT: адрес чата (``/c/<uuid>``, иногда ``/c/WEB:<uuid>``)
+	меняется каждый прогон, а композер сайт отдаёт то ``<textarea>``, то
+	``<div contenteditable>``. Строгая сверка URL и строгая проверка тега ломали
+	повтор на верном действии.
+	"""
+	print('\n[10e] contract: replay tolerates dynamic URLs and interchangeable input controls (pure)')
+	from bu_mcp.macro import _same_page
+
+	cases = [
+		(
+			'/c/<uuid> отличается только id',
+			'https://chatgpt.com/c/6aa2add1-8e14-83eb-80ae-abb823bacb68',
+			'https://chatgpt.com/c/11111111-2222-3333-4444-555555555555',
+			'template',
+		),
+		(
+			'/c/WEB:<uuid> с префиксом источника',
+			'https://chatgpt.com/c/6aa2add1-8e14-83eb-80ae-abb823bacb68',
+			'https://chatgpt.com/c/WEB:aeea1516-c68c-41ce-942c-33e3c7bbd7f0',
+			'template',
+		),
+		('осмысленный сегмент различается -> different', 'https://x.com/settings', 'https://x.com/billing', 'different'),
+		('другой домен -> different', 'https://a.com/c/123456789012', 'https://b.com/c/123456789012', 'different'),
+		('тот же адрес -> same', 'https://x.com/a', 'https://x.com/a', 'same'),
+		('тот же путь, другой query -> query', 'https://x.com/a?p=1', 'https://x.com/a?p=2', 'query'),
+	]
+	bad_cases = [(label, exp, _same_page(a, b)) for label, a, b, exp in cases if _same_page(a, b) != exp]
+	if not bad_cases:
+		ok('_same_page: id-сегменты пути терпит, осмысленные и кросс-доменные различия ловит')
+	else:
+		bad('_same_page: id-сегменты пути терпит, осмысленные и кросс-доменные различия ловит', str(bad_cases)[:240])
+
+	# same_control_class: textarea <-> contenteditable-div — один класс, div<->button — нет.
+	from bu_mcp import resolve as resolve_mod
+
+	class _Ax:
+		def __init__(self, role=None, name=None):
+			self.role = role
+			self.name = name
+
+	class _Node:
+		def __init__(self, tag, attrs=None, role=None):
+			self.node_name = tag
+			self.attributes = attrs or {}
+			self.ax_node = _Ax(role=role) if role else None
+
+	textarea_hint = {'tag': 'textarea', 'attributes': {'aria-label': 'Chat'}}
+	div_editable = _Node('DIV', {'contenteditable': 'true', 'aria-label': 'Chat'})
+	div_role = _Node('DIV', {'aria-label': 'Chat'}, role='textbox')
+	plain_button = _Node('BUTTON', {'aria-label': 'Chat'})
+
+	def sc(hint, node) -> bool:
+		# _Node — утиная подделка EnhancedDOMTreeNode: same_control_class читает
+		# только node_name / attributes / ax_node, поэтому в рантайме этого хватает.
+		return resolve_mod.same_control_class(hint, cast(Any, node))
+
+	checks = [
+		('textarea -> contenteditable div', sc(textarea_hint, div_editable) is True),
+		('textarea -> role=textbox div', sc(textarea_hint, div_role) is True),
+		('textarea -> button отвергается', sc(textarea_hint, plain_button) is False),
+		('одинаковый тег всегда ок', sc({'tag': 'button'}, plain_button) is True),
+	]
+	failed = [label for label, good in checks if not good]
+	if not failed:
+		ok('same_control_class: поля ввода взаимозаменяемы, кнопка полем не считается')
+	else:
+		bad('same_control_class: поля ввода взаимозаменяемы, кнопка полем не считается', str(failed))
 
 
 def headless_contract_checks(BuMcpServer) -> None:

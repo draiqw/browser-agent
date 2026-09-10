@@ -414,8 +414,61 @@ async def checkpoint(
 # --------------------------------------------------------------------------- #
 
 
+#: Сегмент пути, который меняется от прогона к прогону: id ресурса. UUID,
+#: длинный hex, длинное число, длинный смешанный токен. Именно такой сегмент
+#: ChatGPT вставляет в адрес нового чата (``/c/<uuid>``), и сравнивать его
+#: буквально между прогонами бессмысленно — он другой по построению.
+#: uuid где угодно внутри сегмента — не только целиком: ChatGPT отдаёт id чата
+#: то как ``<uuid>``, то как ``WEB:<uuid>``, то есть с префиксом источника.
+_UUID_RE = re.compile(r'[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}', re.I)
+
+
+def _opaque_segment(seg: str) -> bool:
+	if len(seg) < 6:
+		return False
+	if _UUID_RE.search(seg):
+		return True
+	if re.fullmatch(r'[0-9a-f]{12,}', seg, re.I):
+		return True
+	if re.fullmatch(r'\d{6,}', seg):
+		return True
+	# Длинный смешанный токен с цифрой: base64/nanoid-подобные id, возможно с
+	# префиксом источника через двоеточие (``WEB:...``, ``ORG:...``).
+	if len(seg) >= 16 and re.fullmatch(r'[A-Za-z0-9:_-]+', seg) and any(c.isdigit() for c in seg):
+		return True
+	return False
+
+
+def _same_path_template(pa: str, pb: str) -> bool:
+	"""Один ли это шаблон пути с точностью до id-сегментов.
+
+	``/c/<uuid1>`` и ``/c/<uuid2>`` — да: постоянные сегменты совпали, а
+	различаются только те, что на обеих сторонах выглядят как id ресурса.
+	``/settings`` и ``/billing`` — нет: различается осмысленный сегмент.
+	"""
+	sa = [s for s in pa.strip('/').split('/') if s]
+	sb = [s for s in pb.strip('/').split('/') if s]
+	if len(sa) != len(sb) or not sa:
+		return False
+	saw_id_diff = False
+	for x, y in zip(sa, sb):
+		if x == y:
+			continue
+		if _opaque_segment(x) and _opaque_segment(y):
+			saw_id_diff = True
+			continue
+		return False
+	return saw_id_diff
+
+
 def _same_page(a: str | None, b: str | None) -> str:
-	"""``same`` / ``query`` / ``different``: насколько два URL — одна страница."""
+	"""``same`` / ``query`` / ``template`` / ``different``: насколько два URL — одна страница.
+
+	``template`` — тот же origin и тот же шаблон пути, различаются только
+	id-сегменты (``/c/<uuid>``): для сверки это не расхождение, а норма
+	динамического адреса. Осмысленная проверка «а тот ли это ресурс» — дело
+	чекпоинта, а не сравнения непредсказуемого id.
+	"""
 	if a == b:
 		return 'same'
 	if not a or not b:
@@ -426,8 +479,12 @@ def _same_page(a: str | None, b: str | None) -> str:
 		pa, pb = urlsplit(a), urlsplit(b)
 	except Exception:
 		return 'different'
-	if (pa.scheme, pa.netloc, pa.path.rstrip('/')) == (pb.scheme, pb.netloc, pb.path.rstrip('/')):
+	if (pa.scheme, pa.netloc) != (pb.scheme, pb.netloc):
+		return 'different'
+	if pa.path.rstrip('/') == pb.path.rstrip('/'):
 		return 'query'
+	if _same_path_template(pa.path, pb.path):
+		return 'template'
 	return 'different'
 
 
@@ -474,7 +531,7 @@ def _compare(expect: dict[str, Any], observed: dict[str, Any]) -> list[dict[str,
 		wanted = [u for u in (expect.get('url_target'), expect.get('url_after')) if isinstance(u, str) and u]
 		if got and wanted:
 			verdicts = {_same_page(u, got) for u in wanted}
-			if 'same' not in verdicts and 'query' not in verdicts:
+			if not verdicts & {'same', 'query', 'template'}:
 				add(
 					'url_after',
 					wanted[0],
@@ -483,7 +540,7 @@ def _compare(expect: dict[str, Any], observed: dict[str, Any]) -> list[dict[str,
 					'the navigation landed somewhere else than at record time (a redirect, a login wall or a blocked URL)',
 				)
 			elif 'same' not in verdicts:
-				add('url_after', wanted[0], got, 'note', 'same page, different query string or fragment')
+				add('url_after', wanted[0], got, 'note', 'same page template, different query or resource id')
 		return out
 
 	want_changed = expect.get('changed')
@@ -531,13 +588,13 @@ def _compare(expect: dict[str, Any], observed: dict[str, Any]) -> list[dict[str,
 				'stop',
 				'the step navigated somewhere else than at record time',
 			)
-		elif verdict == 'query':
+		elif verdict in ('query', 'template'):
 			add(
 				'url_after',
 				expect.get('url_after'),
 				observed.get('url_after'),
 				'note',
-				'same page, different query string or fragment',
+				'same page template, different query string or resource id (e.g. a freshly created record)',
 			)
 
 	want_tabs = expect.get('tabs_delta')
@@ -636,7 +693,12 @@ def _identity_mismatch(node: Any, hint: dict[str, Any]) -> str | None:
 	tag = (hint.get('tag') or '').lower()
 	got_tag = (getattr(node, 'node_name', '') or '').lower()
 	if tag and got_tag and tag != got_tag:
-		return f'expected <{tag}>, resolved to <{got_tag}>'
+		# Исключение — взаимозаменяемые поля ввода (textarea <-> contenteditable
+		# <-> input): сайт отдаёт один логический контрол разными тегами. Резолв
+		# такое допускает только по сильному якорю, поэтому здесь тоже.
+		resolve_mod = importlib.import_module('bu_mcp.resolve')
+		if not resolve_mod.same_control_class(hint, node):
+			return f'expected <{tag}>, resolved to <{got_tag}>'
 
 	ax = getattr(node, 'ax_node', None)
 	want_name = (hint.get('accessible_name') or '').strip()
