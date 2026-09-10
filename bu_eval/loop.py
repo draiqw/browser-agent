@@ -170,7 +170,7 @@ async def run_openai(
 				tools=tools,
 				max_completion_tokens=max_output_tokens,
 			)
-		except Exception as exc:  # noqa: BLE001 — сбой провайдера это результат прогона, а не крах бенчмарка
+		except Exception as exc:  # — сбой провайдера это результат прогона, а не крах бенчмарка
 			tr.errors.append(f'провайдер: {exc!r}')
 			tr.stopped = 'error'
 			break
@@ -248,7 +248,7 @@ async def run_anthropic(
 				tools=tools,
 				messages=messages,
 			)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			tr.errors.append(f'провайдер: {exc!r}')
 			tr.stopped = 'error'
 			break
@@ -293,7 +293,7 @@ async def _call_tool(tr: Trace, call, name: str, args: dict) -> str:
 	"""Один вызов MCP-инструмента. Отказ сервера — это текст для модели и строка в трассе."""
 	try:
 		res = await call(name, args)
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		tr.errors.append(f'{name}: {exc!r}')
 		return f'Инструмент {name} не отработал: {exc!r}'
 	text = _clip(res.get('text') or '')

@@ -114,7 +114,7 @@ def _integrity_via_git(root: Path) -> Check:
 			text=True,
 			timeout=30,
 		)
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		return Check('harness', 'целостность пакета', False, f'git не ответил: {exc!r}')
 	dirty = [ln[3:] for ln in out.stdout.splitlines() if ln.strip()]
 	head = subprocess.run(
@@ -556,7 +556,7 @@ def check_server_imports() -> Check:
 		from browser_use.filesystem.file_system import FileSystem  # noqa: F401
 		from browser_use.tools.service import Tools  # noqa: F401
 		from browser_use.utils import is_new_tab_page  # noqa: F401
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		problems.append(repr(exc))
 	return Check(
 		'bu_mcp',
@@ -674,7 +674,7 @@ def run_all() -> list[Check]:
 	for fn in CHECKS:
 		try:
 			out.append(fn())
-		except Exception as exc:  # noqa: BLE001 — упавшая проверка это тоже отчёт, а не крах прогона
+		except Exception as exc:  # — упавшая проверка это тоже отчёт, а не крах прогона
 			group = 'harness' if fn.__name__ in HARNESS_CHECKS else 'bu_mcp'
 			out.append(Check(group, fn.__name__, False, f'проверка упала: {exc!r}'))
 	return out

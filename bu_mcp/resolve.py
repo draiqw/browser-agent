@@ -213,7 +213,7 @@ _REGISTRY: dict[int, dict[int, dict[str, Any]]] = {}
 _LAST: dict[int, dict[str, Any]] = {}
 
 
-def _registry(session: 'BrowserSession') -> dict[int, dict[str, Any]]:
+def _registry(session: BrowserSession) -> dict[int, dict[str, Any]]:
 	"""Словарь ``index -> identity`` для конкретной сессии.
 
 	Ключ — ``id(session)``; запись убирается финализатором, когда сессия
@@ -236,7 +236,7 @@ def _forget(key: int) -> None:
 	_LAST.pop(key, None)
 
 
-def _target_url(session: 'BrowserSession', target_id: Any) -> str | None:
+def _target_url(session: BrowserSession, target_id: Any) -> str | None:
 	"""URL страницы, которой принадлежит узел. Синхронно, из session_manager."""
 	if not target_id:
 		return None
@@ -247,7 +247,7 @@ def _target_url(session: 'BrowserSession', target_id: Any) -> str | None:
 	return getattr(target, 'url', None) if target is not None else None
 
 
-def _identity(index: int, node: 'EnhancedDOMTreeNode', session: 'BrowserSession') -> dict[str, Any]:
+def _identity(index: int, node: EnhancedDOMTreeNode, session: BrowserSession) -> dict[str, Any]:
 	"""Слепок всего, чем элемент можно опознать заново.
 
 	Ровно тот набор полей, который browser-use уже вычисляет
@@ -273,7 +273,7 @@ def _identity(index: int, node: 'EnhancedDOMTreeNode', session: 'BrowserSession'
 	}
 
 
-def snapshot_handles(session: 'BrowserSession') -> int:
+def snapshot_handles(session: BrowserSession) -> int:
 	"""Запомнить опознавательные признаки всех элементов текущего selector map.
 
 	Вызывать сразу после сериализации состояния: это единственный момент, когда
@@ -286,12 +286,12 @@ def snapshot_handles(session: 'BrowserSession') -> int:
 	for index, node in selector_map.items():
 		try:
 			reg[index] = _identity(index, node, session)
-		except Exception:  # noqa: BLE001 — сломанный узел не должен ронять снапшот
+		except Exception:  # — сломанный узел не должен ронять снапшот
 			continue
 	return len(selector_map)
 
 
-def last_resolution(session: 'BrowserSession') -> dict[str, Any] | None:
+def last_resolution(session: BrowserSession) -> dict[str, Any] | None:
 	"""Как разрешился последний ``resolve_index``: уровень лестницы, новый индекс.
 
 	MCP-слой может показать клиенту, что хендл «переехал», вместо того чтобы
@@ -305,7 +305,7 @@ def last_resolution(session: 'BrowserSession') -> dict[str, Any] | None:
 # --------------------------------------------------------------------------- #
 
 
-async def _cdp_for(session: 'BrowserSession', target_id: str | None):
+async def _cdp_for(session: BrowserSession, target_id: str | None):
 	try:
 		return await session.get_or_create_cdp_session(target_id, focus=False)
 	except Exception:
@@ -315,7 +315,7 @@ async def _cdp_for(session: 'BrowserSession', target_id: str | None):
 			return None
 
 
-async def _is_reachable(session: 'BrowserSession', node: 'EnhancedDOMTreeNode') -> bool:
+async def _is_reachable(session: BrowserSession, node: EnhancedDOMTreeNode) -> bool:
 	"""Жив ли backendNodeId И подключён ли узел к документу.
 
 	Двухступенчато, потому что это два разных вида смерти:
@@ -375,9 +375,9 @@ async def _is_reachable(session: 'BrowserSession', node: 'EnhancedDOMTreeNode') 
 
 
 def _prefer(
-	candidates: list[tuple[int, 'EnhancedDOMTreeNode']],
+	candidates: list[tuple[int, EnhancedDOMTreeNode]],
 	ident: dict[str, Any],
-) -> list[tuple[int, 'EnhancedDOMTreeNode']]:
+) -> list[tuple[int, EnhancedDOMTreeNode]]:
 	"""Сузить кандидатов до того же таргета, затем до того же фрейма.
 
 	Предпочтение, а не фильтр: если в нужном таргете/фрейме кандидатов нет,
@@ -398,7 +398,7 @@ def _prefer(
 	return candidates
 
 
-def _tag_ok(node: 'EnhancedDOMTreeNode', ident: dict[str, Any]) -> bool:
+def _tag_ok(node: EnhancedDOMTreeNode, ident: dict[str, Any]) -> bool:
 	tag = ident.get('tag')
 	if not tag:
 		return True
@@ -407,10 +407,10 @@ def _tag_ok(node: 'EnhancedDOMTreeNode', ident: dict[str, Any]) -> bool:
 
 def _candidates_for_level(
 	level: str,
-	items: list[tuple[int, 'EnhancedDOMTreeNode']],
+	items: list[tuple[int, EnhancedDOMTreeNode]],
 	ident: dict[str, Any],
-	session: 'BrowserSession',
-) -> tuple[list[tuple[int, 'EnhancedDOMTreeNode']], str]:
+	session: BrowserSession,
+) -> tuple[list[tuple[int, EnhancedDOMTreeNode]], str]:
 	"""Кандидаты одной ступени лестницы + описание того, по чему искали."""
 	if level == 'backend_node_id':
 		want = ident.get('backend_node_id')
@@ -515,7 +515,7 @@ def _candidates_for_level(
 	return [], ''
 
 
-def _describe_candidate(index: int, node: 'EnhancedDOMTreeNode') -> str:
+def _describe_candidate(index: int, node: EnhancedDOMTreeNode) -> str:
 	ax = getattr(node, 'ax_node', None)
 	name = (ax.name if ax else None) or ''
 	if len(name) > 40:
@@ -523,7 +523,7 @@ def _describe_candidate(index: int, node: 'EnhancedDOMTreeNode') -> str:
 	return f'[{index}] <{(node.node_name or "?").lower()}> {node.xpath} name={name!r}'
 
 
-async def _refresh(session: 'BrowserSession') -> dict[int, 'EnhancedDOMTreeNode']:
+async def _refresh(session: BrowserSession) -> dict[int, EnhancedDOMTreeNode]:
 	"""Пересобрать состояние и вернуть свежий selector map.
 
 	Скриншот не запрашиваем — он тут не нужен и стоит дорого.
@@ -547,11 +547,11 @@ async def _refresh(session: 'BrowserSession') -> dict[int, 'EnhancedDOMTreeNode'
 
 
 async def resolve_index(
-	session: 'BrowserSession',
+	session: BrowserSession,
 	index: int,
 	*,
 	hint: dict[str, Any] | None = None,
-) -> 'EnhancedDOMTreeNode':
+) -> EnhancedDOMTreeNode:
 	"""Вернуть живой узел для индекса или упасть.
 
 	Args:
@@ -673,7 +673,7 @@ async def resolve_index(
 	)
 
 
-async def describe_handle(session: 'BrowserSession', index: int) -> dict[str, Any]:
+async def describe_handle(session: BrowserSession, index: int) -> dict[str, Any]:
 	"""Всё, что известно об элементе под этим индексом.
 
 	Нужно, чтобы MCP-слой отдавал клиенту составной хендл, а не голое число:
@@ -800,7 +800,7 @@ if __name__ == '__main__':
 			except StaleHandleError as exc:
 				print(f'  resolve_index(999999) -> StaleHandleError: {exc}')
 				ok('несуществующий индекс ломает действие, а не возвращает None')
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				failures += 1
 				fail(f'ожидали StaleHandleError, получили {type(exc).__name__}: {exc}')
 
@@ -836,9 +836,7 @@ if __name__ == '__main__':
 
 			resolved = await resolve_index(session, target_index)
 			info = last_resolution(session)
-			print(
-				f'  resolve_index({target_index}) -> <{resolved.node_name.lower()}> ' f'backendNodeId={resolved.backend_node_id}'
-			)
+			print(f'  resolve_index({target_index}) -> <{resolved.node_name.lower()}> backendNodeId={resolved.backend_node_id}')
 			print(f'  last_resolution: {info}')
 			if (
 				info
@@ -866,7 +864,7 @@ if __name__ == '__main__':
 					break
 			assert amb_index is not None
 			amb_before = await describe_handle(session, amb_index)
-			print(f'  запомнили index={amb_index} xpath={amb_before["xpath"]} ' f'ax_name={amb_before["accessible_name"]!r}')
+			print(f'  запомнили index={amb_index} xpath={amb_before["xpath"]} ax_name={amb_before["accessible_name"]!r}')
 
 			# Ломаем структуру (xpath больше не совпадёт) и оставляем ДВА
 			# элемента с одинаковым accessible name.
@@ -934,9 +932,7 @@ if __name__ == '__main__':
 			await session.get_browser_state_summary(include_screenshot=False, cached=False)
 			trap = [(i, n) for i, n in (session._cached_selector_map or {}).items() if n.xpath == url_before['xpath']]
 			print(f'  новый URL: {await session.get_current_page_url()}')
-			print(
-				f'  ловушка: на том же xpath сейчас {len(trap)} элемент(ов): ' f'{[_describe_candidate(i, n) for i, n in trap]}'
-			)
+			print(f'  ловушка: на том же xpath сейчас {len(trap)} элемент(ов): {[_describe_candidate(i, n) for i, n in trap]}')
 			print('  без защиты ступень xpath вернула бы вот этот чужой элемент')
 			try:
 				got = await resolve_index(session, url_index)
@@ -989,7 +985,7 @@ if __name__ == '__main__':
 			print('  список перерисован без первой записи: узлы пересозданы, позиции сдвинулись')
 			await session.get_browser_state_summary(include_screenshot=False, cached=False)
 			now_at_row1_xpath = [(i, n) for i, n in (session._cached_selector_map or {}).items() if n.xpath == row1['xpath']]
-			print(f'  на xpath Row 1 ({row1["xpath"]}) теперь: ' f'{[_describe_candidate(i, n) for i, n in now_at_row1_xpath]}')
+			print(f'  на xpath Row 1 ({row1["xpath"]}) теперь: {[_describe_candidate(i, n) for i, n in now_at_row1_xpath]}')
 			print('  без защиты resolve вернул бы Row 2 вместо удалённой Row 1')
 
 			try:
@@ -1010,7 +1006,7 @@ if __name__ == '__main__':
 			got3 = await resolve_index(session, row3_index)
 			info3 = last_resolution(session)
 			ax3 = getattr(got3, 'ax_node', None)
-			print(f'  resolve_index(Row 3 = {row3_index}) -> {(ax3.name if ax3 else None)!r}, ' f'{info3}')
+			print(f'  resolve_index(Row 3 = {row3_index}) -> {(ax3.name if ax3 else None)!r}, {info3}')
 			if ax3 and ax3.name == 'Row 3' and info3 and info3.get('level') == 'accessible_name':
 				ok('живая Row 3 доехала по accessible name — гард роняет ступень, а не весь резолв')
 			else:
@@ -1024,7 +1020,7 @@ if __name__ == '__main__':
 					event = session.event_bus.dispatch(CloseTabEvent(target_id=my_tab))
 					await event
 					print(f'  своя вкладка {my_tab} закрыта')
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				print(f'  не удалось закрыть вкладку: {exc}')
 			tabs_after = {t.target_id for t in await session.get_tabs()}
 			print(f'  чужих вкладок было {len(tabs_before)}, осталось {len(tabs_after & tabs_before)}')

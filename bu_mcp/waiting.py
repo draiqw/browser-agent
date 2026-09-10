@@ -333,7 +333,7 @@ def _lifecycle_has(lifecycle: Any, loader_id: str, names: set[str] | None = None
 				continue
 			if names is None or event.get('name') in names:
 				return True
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return False
 	return False
 
@@ -434,7 +434,7 @@ async def _stage_mutation_quiet(session: Any, target_id: str | None, deadline: f
 	finally:
 		try:
 			await _evaluate(session, target_id, _JS_MUTATION_TEARDOWN, budget=_MUTATION_TEARDOWN_BUDGET)
-		except Exception as exc:  # noqa: BLE001 — teardown никогда не должен ломать ожидание
+		except Exception as exc:  # — teardown никогда не должен ломать ожидание
 			logger.debug('waiting: mutation observer teardown failed: %r', exc)
 
 
@@ -504,12 +504,12 @@ async def wait_for_page_ready(session: Any, *, timeout: float = 8.0) -> dict:
 				timeout=budget + 0.25,
 			)
 			ok = True
-		except (TimeoutError, asyncio.TimeoutError) as exc:
+		except TimeoutError as exc:
 			ok = False
 			detail = f'timeout after {budget:.2f}s' + (f': {exc}' if str(exc) else '')
 		except asyncio.CancelledError:
 			raise
-		except Exception as exc:  # noqa: BLE001 — fail-open, это весь смысл лестницы
+		except Exception as exc:  # — fail-open, это весь смысл лестницы
 			ok, detail = False, f'{type(exc).__name__}: {exc}'
 
 		elapsed = round(_now() - stage_start, 3)
@@ -595,7 +595,7 @@ async def wait_after_navigation(session: Any, *, timeout: float = 10.0, baseline
 	try:
 		if target_id is not None and getattr(session, 'session_manager', None) is not None:
 			lifecycle = session.session_manager.get_lifecycle_events(target_id)
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		logger.debug('wait_after_navigation: lifecycle buffer unavailable: %r', exc)
 
 	# --- стадия 1: началась ли навигация -------------------------------------
@@ -650,7 +650,7 @@ async def wait_after_navigation(session: Any, *, timeout: float = 10.0, baseline
 			await asyncio.sleep(0.05)
 	except asyncio.CancelledError:
 		raise
-	except Exception as exc:  # noqa: BLE001 — fail-open
+	except Exception as exc:  # — fail-open
 		detail = f'{type(exc).__name__}: {exc}'
 
 	stages.append({'name': 'navigation_start', 'ok': True, 'elapsed': round(_now() - stage_start, 3), 'detail': detail})
@@ -705,7 +705,7 @@ async def wait_after_navigation(session: Any, *, timeout: float = 10.0, baseline
 				detail = f'timeout waiting for load/networkIdle; saw: {", ".join(seen[-6:]) or "nothing"}'
 		except asyncio.CancelledError:
 			raise
-		except Exception as exc:  # noqa: BLE001 — fail-open
+		except Exception as exc:  # — fail-open
 			ok, detail = False, f'{type(exc).__name__}: {exc}'
 
 		stages.append({'name': 'lifecycle_load', 'ok': ok, 'elapsed': round(_now() - stage_start, 3), 'detail': detail})
@@ -822,7 +822,7 @@ async def _selfcheck() -> int:
 			try:
 				started = await _evaluate(session, my_tab, _CHAOS_JS, budget=8.0)
 				break
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				print(f'  chaos injection attempt {attempt + 1} failed: {exc!r}')
 				await asyncio.sleep(1.0)
 		if started is None:
@@ -846,11 +846,11 @@ async def _selfcheck() -> int:
 			try:
 				await session.close_page(my_tab)
 				print(f'\nclosed own tab {my_tab[:12]}...')
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				print(f'\nWARN: не смог закрыть свою вкладку: {exc!r}')
 		try:
 			await session.stop()  # отключается, но НЕ убивает чужой Chrome
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			print(f'WARN: session.stop() failed: {exc!r}')
 
 	print('\n' + '-' * 70)

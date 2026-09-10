@@ -158,7 +158,7 @@ def attached_profile():
 		try:
 			profile.viewport = None
 			profile.no_viewport = True
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			print(f'[bu_eval] не смог снять viewport-override с чужого браузера: {exc!r}', file=sys.stderr)
 	return profile
 
@@ -205,7 +205,7 @@ class BrowserUseBackend:
 			rep.data = history.structured_output
 			rep.ok = rep.data is not None
 			rep.stopped = 'done' if rep.ok else 'max_steps'
-		except Exception as exc:  # noqa: BLE001 — упавший прогон это строка отчёта, а не крах матрицы
+		except Exception as exc:  # — упавший прогон это строка отчёта, а не крах матрицы
 			rep.errors.append(repr(exc))
 			rep.stopped = 'error'
 		finally:
@@ -213,7 +213,7 @@ class BrowserUseBackend:
 			# проходит мимо гарда keep_alive и погасил бы чужой Chrome целиком.
 			try:
 				await browser.stop()
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				rep.errors.append(f'сессия не закрылась чисто: {exc!r}')
 			await _restore_tabs(foreign, rep)
 
@@ -243,18 +243,18 @@ async def _restore_tabs(foreign: dict[str, str], rep: RunReport) -> None:
 
 	try:
 		now = {t['id']: (t.get('url') or '') for t in cdp_pages()}
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return
 	for tid, url in now.items():
 		if tid not in foreign:
 			try:
 				urllib.request.urlopen(f'{cdp_url()}/json/close/{tid}', timeout=10).read()  # noqa: ASYNC210 — уборка, вне измеряемого пути
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				rep.errors.append(f'не закрылась своя вкладка {tid[:8]}: {exc!r}')
 		elif foreign[tid] in _BLANK_URLS and url not in _BLANK_URLS:
 			try:
 				await cdp_eval(tid, "window.location.replace('about:blank')")
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				rep.errors.append(f'не вернул взятую взаймы вкладку {tid[:8]} на about:blank: {exc!r}')
 	lost = [tid[:8] for tid in foreign if tid not in now]
 	if lost:
@@ -326,7 +326,7 @@ class BuMcpBackend:
 			rep.stopped = tr.stopped
 			rep.data = tr.data
 			rep.ok = tr.data is not None
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			rep.errors.append(repr(exc))
 			rep.stopped = rep.stopped or 'error'
 
@@ -379,7 +379,7 @@ class ScriptedBackend:
 				rep.data = await task.script(call)
 			rep.ok = rep.data is not None
 			rep.stopped = 'done' if rep.ok else 'no_result'
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			rep.errors.append(repr(exc))
 			rep.stopped = 'error'
 
@@ -465,16 +465,16 @@ async def _release_own_tab(cdp_url: str, own_tab: str | None, reused: bool, fore
 	if own_tab and not reused:
 		try:
 			urllib.request.urlopen(f'{cdp_url}/json/close/{own_tab}', timeout=10).read()  # noqa: ASYNC210 — уборка, вне измеряемого пути
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			rep.errors.append(f'не закрылась своя вкладка {own_tab[:8]}: {exc!r}')
 	elif own_tab and reused:
 		try:
 			await cdp_eval(own_tab, "window.location.replace('about:blank')")
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			rep.errors.append(f'не вернул взятую взаймы вкладку {own_tab[:8]} на about:blank: {exc!r}')
 	try:
 		still = {t['id'] for t in cdp_pages()}
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return
 	lost = [tid[:8] for tid in foreign if tid not in still]
 	if lost:

@@ -53,7 +53,7 @@ def ground_truth(limit: int = 45) -> set[str]:
 				item = _get(f'{API}/item/{i}.json')
 				if item and item.get('title'):
 					titles.append(item['title'])
-			except Exception:  # noqa: BLE001 — эталон с дыркой лучше, чем упавшая проверка
+			except Exception:  # — эталон с дыркой лучше, чем упавшая проверка
 				continue
 		_GT = {_norm(t) for t in titles}
 	return _GT
@@ -84,7 +84,7 @@ def verify(data: Front) -> list[str]:
 		if share < TOLERANCE:
 			miss = [s.title for s in data.stories if _norm(s.title) not in gt][:5]
 			problems.append(
-				f'совпало с API {hit}/{len(data.stories)} ({share:.0%}), ' f'порог {TOLERANCE:.0%}; примеры расхождений: {miss}'
+				f'совпало с API {hit}/{len(data.stories)} ({share:.0%}), порог {TOLERANCE:.0%}; примеры расхождений: {miss}'
 			)
 	else:
 		problems.append('эталон HN недоступен — проверка неполная')

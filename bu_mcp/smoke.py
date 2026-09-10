@@ -53,7 +53,7 @@ def as_json(body: str) -> dict:
 	"""Ответ инструмента как dict; не JSON — пустой dict (значит, проверка не сошлась)."""
 	try:
 		out = json.loads(body)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return {}
 	return out if isinstance(out, dict) else {}
 
@@ -359,7 +359,7 @@ def contract_checks() -> None:
 	print('\n[10] contract: ActionResult / new-tab / scroll (pure)')
 	try:
 		from bu_mcp.server import BuMcpServer, ToolError
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		bad('bu_mcp.server imports for contract checks', f'{type(exc).__name__}: {exc}')
 		return
 
@@ -565,14 +565,14 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 	outcome = outcome or (lambda *a, **k: None)
 	if write is None:
 
-		def write(_entry):  # noqa: E306 — заглушка обязана падать, иначе тесты изоляции пройдут вхолостую
+		def write(_entry):  # — заглушка обязана падать, иначе тесты изоляции пройдут вхолостую
 			raise AssertionError('_journal_write is missing from the server')
 
 	macro_urls = macro_urls or (lambda *a, **k: [])
 	summary = summary or (lambda *a, **k: {})
 	if macro_name is None:
 
-		def macro_name(_raw):  # noqa: E306
+		def macro_name(_raw):
 			return '<no _macro_name>'
 
 	fields = getattr(sys.modules[BuMcpServer.__module__], 'JOURNAL_FIELDS', ())
@@ -625,12 +625,12 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 	try:
 		captured: list = []
 		good = _types.ModuleType('bu_mcp.journal')
-		good.record = lambda e: captured.append(e)  # noqa: E731
+		good.record = lambda e: captured.append(e)
 		sys.modules['bu_mcp.journal'] = good
 		e = open_('browser_type', {'index': 3, 'text': 'x'})
 		try:
 			write(e)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			print(f'  _journal_write: {exc}')
 		if len(captured) == 1 and captured[0]['outcome'] == 'ok' and isinstance(captured[0].get('cost_ms'), float):
 			ok('journal: a normal action is handed to journal.record with its own measured cost')
@@ -646,7 +646,7 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		sys.modules['bu_mcp.journal'] = broken
 		try:
 			write(open_('browser_click', {'index': 1}))
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			bad('journal: a failing journal.record does not break the action', f'{type(exc).__name__}: {exc}')
 		else:
 			ok('journal: a failing journal.record does not break the action')
@@ -654,7 +654,7 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		sys.modules['bu_mcp.journal'] = None  # importlib -> ImportError
 		try:
 			write(open_('browser_click', {'index': 1}))
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			bad('journal: a missing journal module does not break the action', f'{type(exc).__name__}: {exc}')
 		else:
 			ok('journal: a missing journal module does not break the action')
@@ -845,7 +845,7 @@ def delta_contract_checks(BuMcpServer, ToolError) -> None:
 	# 6. Пустая дельта при рапорте об успехе -> ФЛАГ, а не исключение.
 	try:
 		out = verdict(DELTA_BEFORE, same, probes=3, cost_ms=6.0, settle_ms=240.0, reported_ok=True)
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		bad('delta: an empty delta is a flag, not an error', f'{type(exc).__name__}: {exc}')
 	else:
 		if out.get('no_effect') is True and out.get('changed') is False and out.get('status') == 'no-change':
@@ -1562,7 +1562,7 @@ async def journal_macro_checks(session) -> None:
 		if macro_file:
 			try:
 				Path(macro_file).unlink()
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				print(f'  cleanup: could not remove {macro_file}: {exc}')
 		# Уборка: закрываем ТОЛЬКО свои вкладки, по своему множеству id.
 		tabs = state_of(await session.call_tool('browser_state', {})).get('tabs', [])
@@ -1713,7 +1713,7 @@ async def allowlist_check() -> None:
 							bad('allowlist run cleaned up its tab', text_of(cl)[:150])
 	try:
 		gate_macro_file.unlink()
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		print(f'  cleanup: could not remove {gate_macro_file}: {exc}')
 
 

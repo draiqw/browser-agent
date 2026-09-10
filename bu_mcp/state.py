@@ -465,7 +465,7 @@ _OFFSCREEN_JS = """
 """ % (VIEWPORT_THRESHOLD_PX, _MAX_COUNTED_OFFSCREEN)
 
 
-async def _count_offscreen_interactive(session: 'BrowserSession') -> dict[str, int]:
+async def _count_offscreen_interactive(session: BrowserSession) -> dict[str, int]:
 	"""Count interactive elements dropped by the viewport+threshold filter.
 
 	browser-use only emits this hint for iframes
@@ -564,7 +564,7 @@ def _truncate_lines(body: str, budget: int) -> tuple[str, bool]:
 # --------------------------------------------------------------------------- #
 
 
-async def serialize_state(session: 'BrowserSession', *, max_chars: int = 40000) -> dict:
+async def serialize_state(session: BrowserSession, *, max_chars: int = 40000) -> dict:
 	"""Serialize the current browser state into a compact text tree.
 
 	Args:
@@ -889,9 +889,9 @@ async def _selfcheck() -> int:
 	assert restore_option_marker(_sel).endswith('options=A|B|C|D|+2 more via dropdown_options) />'), restore_option_marker(_sel)
 	# ...still restored when a format hint follows the option list.
 	_fmt = 'count=7,options=A|B|C|D,format=numeric)'
-	assert (
-		restore_option_marker(_fmt) == 'count=7,options=A|B|C|D|+3 more via dropdown_options,format=numeric)'
-	), restore_option_marker(_fmt)
+	assert restore_option_marker(_fmt) == 'count=7,options=A|B|C|D|+3 more via dropdown_options,format=numeric)', (
+		restore_option_marker(_fmt)
+	)
 	# Nothing missing -> nothing added.
 	assert restore_option_marker('count=4,options=A|B|C|D)') == 'count=4,options=A|B|C|D)'
 	assert restore_option_marker('count=3,options=A|B|C)') == 'count=3,options=A|B|C)'

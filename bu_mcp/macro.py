@@ -180,7 +180,7 @@ def _probe_source() -> tuple[str, str]:
 		js = getattr(server, '_DELTA_PROBE_JS', None)
 		if isinstance(js, str) and js.strip():
 			return js, 'server'
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		logger.debug('macro: bu_mcp.server unavailable, using the local probe: %r', exc)
 	return _LOCAL_PROBE_JS, 'local'
 
@@ -205,11 +205,11 @@ async def probe(session: Any) -> dict[str, Any]:
 		if isinstance(value, dict):
 			out.update(value)
 			out['ok'] = True
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		logger.debug('macro: page probe failed: %r', exc)
 	try:
 		out['tabs'] = len(await session.get_tabs())
-	except Exception:  # noqa: BLE001
+	except Exception:
 		pass
 	return out
 
@@ -267,7 +267,7 @@ def _same_page(a: str | None, b: str | None) -> str:
 		from urllib.parse import urlsplit
 
 		pa, pb = urlsplit(a), urlsplit(b)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return 'different'
 	if (pa.scheme, pa.netloc, pa.path.rstrip('/')) == (pb.scheme, pb.netloc, pb.path.rstrip('/')):
 		return 'query'
@@ -518,7 +518,7 @@ async def _resolve_step(
 			# дальше реже.
 			await asyncio.sleep(min(1.0, 0.15 * (1.6 ** (attempts - 1))))
 			continue
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			raise StepFailed(f'cannot resolve the recorded element: {type(exc).__name__}: {exc}') from exc
 
 		mismatch = _identity_mismatch(node, hint)
@@ -537,7 +537,7 @@ async def _resolve_step(
 			# ЗАПИСИ, иначе читателю нечего с ним соотнести.
 			resolution['index'] = hint.get('index')
 			info['resolution'] = resolution
-		except Exception:  # noqa: BLE001
+		except Exception:
 			pass
 		if last is not None:
 			info['waited'] = True
@@ -589,7 +589,7 @@ def _result_text(name: str, result: Any) -> str:
 	try:
 		server = importlib.import_module('bu_mcp.server')
 		marker = server.BuMcpServer._classify_noop(name, joined)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		if _STALE_INDEX_RE.search(joined):
 			marker = 'stale-index'
 	if marker is not None:
@@ -611,7 +611,7 @@ async def _hover(session: Any, node: Any) -> str:
 	try:
 		await cdp.cdp_client.send.DOM.scrollIntoViewIfNeeded(params={'backendNodeId': node.backend_node_id}, session_id=sid)
 		await asyncio.sleep(0.05)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		pass
 
 	metrics = await cdp.cdp_client.send.Page.getLayoutMetrics(session_id=sid)
@@ -658,7 +658,7 @@ async def _ensure_target(session: Any, home: Any) -> str | None:
 		return None
 	try:
 		ids = {str(t.target_id) for t in await session.get_tabs()}
-	except Exception:  # noqa: BLE001
+	except Exception:
 		ids = set()
 	if str(home) not in ids:
 		raise StepFailed(
@@ -692,7 +692,7 @@ async def _act(session: Any, tool: str, params: dict[str, Any], node: Any, live_
 		result = await tools.registry.execute_action(name, payload, browser_session=session, file_system=fs)
 	except StepFailed:
 		raise
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		raise StepFailed(f'{name} raised {type(exc).__name__}: {exc}') from exc
 	return _result_text(name, result)
 
@@ -757,7 +757,7 @@ async def run(
 	session: Any,
 	macro: dict[str, Any],
 	*,
-	vars: dict[str, Any] | None = None,  # noqa: A002 — имя из контракта
+	vars: dict[str, Any] | None = None,  # — имя из контракта
 	strict: bool = True,
 	raise_on_failure: bool = False,
 	step_timeout: float = DEFAULT_STEP_TIMEOUT,
@@ -850,7 +850,7 @@ async def run(
 		try:
 			raw = await _evaluate(session, '({vw: innerWidth, vh: innerHeight})')
 			current_viewport = {'width': raw.get('vw'), 'height': raw.get('vh')}
-		except Exception:  # noqa: BLE001
+		except Exception:
 			current_viewport = None
 	verdict = _viewport_verdict(recorded_viewport, current_viewport)
 	if verdict is None and not recorded_viewport:
@@ -958,7 +958,7 @@ async def run(
 				return stop(n, message, exc.discrepancies)
 			report['warnings'].append(message)
 			continue
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			record.update(status='failed', error=f'{type(exc).__name__}: {exc}')
 			record['elapsed'] = round(time.perf_counter() - step_started, 3)
 			report['steps'].append(record)
@@ -1037,7 +1037,7 @@ document.getElementById('add').addEventListener('click', function () {
 		"""
 
 		class Handler(BaseHTTPRequestHandler):
-			def do_GET(self):  # noqa: N802
+			def do_GET(self):
 				body = html.encode()
 				self.send_response(200)
 				self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -1046,7 +1046,7 @@ document.getElementById('add').addEventListener('click', function () {
 				self.end_headers()
 				self.wfile.write(body)
 
-			def log_message(self, *args):  # noqa: A003
+			def log_message(self, *args):
 				pass
 
 		httpd = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -1062,7 +1062,7 @@ document.getElementById('add').addEventListener('click', function () {
 	def fail(text: str) -> None:
 		print(f'  FAIL  {text}')
 
-	async def main() -> int:  # noqa: C901
+	async def main() -> int:
 		from browser_use.browser import BrowserProfile, BrowserSession
 		from browser_use.browser.events import CloseTabEvent
 		from bu_mcp import journal as journal_mod
@@ -1099,7 +1099,7 @@ document.getElementById('add').addEventListener('click', function () {
 				print(f'  !! фокус уехал на {session.agent_focus_target_id}, возвращаем на {my_tab}')
 				try:
 					await session.get_or_create_cdp_session(my_tab, focus=True)
-				except Exception as exc:  # noqa: BLE001
+				except Exception as exc:
 					raise AssertionError(
 						f'своя вкладка {my_tab} исчезла ({exc}); в этом Chrome работает кто-то ещё — '
 						f'запусти самопроверку на отдельном порту через BU_MCP_CDP_URL'
@@ -1382,7 +1382,7 @@ document.getElementById('add').addEventListener('click', function () {
 					print(f'  своя вкладка {my_tab} закрыта')
 				elif my_tab:
 					print(f'  вкладка {my_tab} была чужой (переиспользована) — НЕ закрываем')
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				print(f'  вкладку закрыть не удалось: {exc}')
 			left = {t.target_id for t in await session.get_tabs()}
 			print(f'  чужих вкладок было {len(foreign)}, осталось {len(left & foreign)}')

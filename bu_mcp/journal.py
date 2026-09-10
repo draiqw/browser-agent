@@ -186,7 +186,7 @@ def current_path() -> Path:
 	path = home() / 'journals' / f'{_session_id()}.jsonl'
 	try:
 		path.parent.mkdir(parents=True, exist_ok=True)
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		logger.debug('journal: cannot create %s: %r', path.parent, exc)
 	return path
 
@@ -255,7 +255,7 @@ async def capture(session: Any, index: int | None = None) -> dict[str, Any]:
 			from bu_mcp import resolve as _resolve
 
 			out['handle'] = await _resolve.describe_handle(session, int(index))
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			logger.debug('journal: describe_handle(%s) failed: %r', index, exc)
 
 	try:
@@ -275,7 +275,7 @@ async def capture(session: Any, index: int | None = None) -> dict[str, Any]:
 			if dpr and float(dpr) != 1.0:
 				page['dpr'] = round(float(dpr), 2)
 			out['page'] = page
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		logger.debug('journal: page context probe failed: %r', exc)
 
 	return out
@@ -336,7 +336,7 @@ def record(entry: dict[str, Any]) -> None:
 		path = current_path()
 		with path.open('a', encoding='utf-8') as fh:
 			fh.write(line + '\n')
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		logger.debug('journal: record failed: %r', exc)
 
 
@@ -354,7 +354,7 @@ def _sanitize(value: Any, _depth: int = 0) -> Any:
 		return str(value)
 	try:
 		return repr(value)[:500]
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return '<unrepresentable>'
 
 
@@ -374,13 +374,13 @@ def read(path: Path | None = None, *, limit: int | None = None) -> list[dict[str
 					continue
 				try:
 					item = json.loads(line)
-				except Exception:  # noqa: BLE001
+				except Exception:
 					continue
 				if isinstance(item, dict):
 					out.append(item)
 	except FileNotFoundError:
 		return []
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		logger.debug('journal: read %s failed: %r', target, exc)
 		return out
 	if limit is not None and limit >= 0:
@@ -571,7 +571,7 @@ def _expectation(entry: dict[str, Any]) -> dict[str, Any]:
 		try:
 			before_n, after_n = fields['tabs']
 			expect['tabs_delta'] = int(after_n) - int(before_n)
-		except Exception:  # noqa: BLE001
+		except Exception:
 			expect['tabs_delta'] = None
 	if 'dialogs' in fields:
 		expect['dialogs_changed'] = True
@@ -881,7 +881,7 @@ if __name__ == '__main__':
 		"""Локальный http-сервер: нужен настоящий URL, который переживает reload."""
 
 		class Handler(BaseHTTPRequestHandler):
-			def do_GET(self):  # noqa: N802
+			def do_GET(self):
 				body = html.encode()
 				self.send_response(200)
 				self.send_header('Content-Type', 'text/html; charset=utf-8')
@@ -890,7 +890,7 @@ if __name__ == '__main__':
 				self.end_headers()
 				self.wfile.write(body)
 
-			def log_message(self, *args):  # noqa: A003
+			def log_message(self, *args):
 				pass
 
 		httpd = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
@@ -1084,7 +1084,7 @@ if __name__ == '__main__':
 					print(f'  своя вкладка {my_tab} закрыта')
 				elif my_tab:
 					print(f'  вкладка {my_tab} была чужой (переиспользована) — НЕ закрываем')
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				print(f'  вкладку закрыть не удалось: {exc}')
 			left = {t.target_id for t in await session.get_tabs()}
 			print(f'  чужих вкладок было {len(foreign)}, осталось {len(left & foreign)}')

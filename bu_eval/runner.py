@@ -64,13 +64,13 @@ async def run_matrix(mx: Matrix, on_result=None) -> list[RunReport]:
 			if rep.ok and mx.verify:
 				try:
 					rep.problems = task.verify(rep.data)
-				except Exception as exc:  # noqa: BLE001 — упавшая проверка это провал, а не успех
+				except Exception as exc:  # — упавшая проверка это провал, а не успех
 					rep.problems = [f'проверка упала: {exc!r}']
 				rep.verified = not rep.problems
 				if task.summary:
 					try:
 						rep.summary = task.summary(rep.data)
-					except Exception:  # noqa: BLE001
+					except Exception:
 						pass
 			elif not rep.ok:
 				rep.problems = ['агент не вернул данные по схеме']

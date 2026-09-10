@@ -210,7 +210,7 @@ class McpClient:
 				if text:
 					self._stderr_tail.append(text)
 					del self._stderr_tail[:-40]
-		except Exception:  # noqa: BLE001
+		except Exception:
 			pass
 
 	def _next_id(self) -> int:
@@ -258,7 +258,7 @@ class McpClient:
 		t0 = time.monotonic()
 		try:
 			result = await self._request('tools/call', {'name': tool, 'arguments': args}, timeout=timeout)
-		except (TimeoutError, asyncio.TimeoutError):
+		except TimeoutError:
 			return {
 				'ok': False,
 				'is_error': True,
@@ -289,7 +289,7 @@ class McpClient:
 				pass
 			try:
 				await asyncio.wait_for(self.proc.wait(), timeout=10)
-			except (TimeoutError, asyncio.TimeoutError):
+			except TimeoutError:
 				pass
 
 
@@ -357,7 +357,7 @@ def split_header_and_tree(text: str) -> tuple[dict[str, Any] | None, str]:
 	head, _, rest = text.partition('\n')
 	try:
 		payload = json.loads(head)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		return None, ''
 	return (payload, rest) if isinstance(payload, dict) else (None, '')
 
@@ -369,7 +369,7 @@ def parse_state(server_key: str, text: str) -> dict[str, Any]:
 	split_tree = ''
 	try:
 		payload = json.loads(text)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		payload, split_tree = split_header_and_tree(text)
 	if isinstance(payload, dict) and split_tree and not payload.get('tree'):
 		payload = {**payload, 'tree': split_tree}
@@ -415,7 +415,7 @@ def find_probe_index(server_key: str, text: str, token: str) -> int | None:
 	"""Locate the index of the injected probe button in a state payload."""
 	try:
 		payload = json.loads(text)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		payload = None
 	if isinstance(payload, dict):
 		elems = payload.get('interactive_elements')
@@ -638,7 +638,7 @@ async def measure_once(bound: Bound, url: str) -> dict[str, Any]:
 	if spec.key == 'ours' and not nav['is_error']:
 		try:
 			waiting = json.loads(nav['text']).get('waiting')
-		except Exception:  # noqa: BLE001
+		except Exception:
 			waiting = None
 		if isinstance(waiting, dict):
 			rec['waiting'] = {
@@ -679,7 +679,7 @@ async def stale_test(bound: Bound, site_key: str) -> dict[str, Any]:
 		rec: dict[str, Any] = {}
 		try:
 			await cdp_eval(bound.target_id, JS_INSTALL.replace('%TOKEN%', json.dumps(token)))
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			rec['error'] = f'install failed: {exc}'
 			out[variant] = rec
 			continue
@@ -695,7 +695,7 @@ async def stale_test(bound: Bound, site_key: str) -> dict[str, Any]:
 			# Not enough to say "not found": say what was on top of it instead.
 			try:
 				rec['diagnosis'] = await cdp_eval(bound.target_id, JS_DIAGNOSE)
-			except Exception as exc:  # noqa: BLE001
+			except Exception as exc:
 				rec['diagnosis'] = f'diagnosis failed: {exc}'
 			rec['state_elements'] = parse_state(spec.key, st['text'])['elements']
 			rec['error'] = 'probe not present in state output'
@@ -705,7 +705,7 @@ async def stale_test(bound: Bound, site_key: str) -> dict[str, Any]:
 
 		try:
 			rec['mutation'] = await cdp_eval(bound.target_id, js)
-		except Exception as exc:  # noqa: BLE001
+		except Exception as exc:
 			rec['error'] = f'mutation failed: {exc}'
 			out[variant] = rec
 			continue
@@ -713,7 +713,7 @@ async def stale_test(bound: Bound, site_key: str) -> dict[str, Any]:
 		url_before = None
 		try:
 			url_before = await cdp_eval(bound.target_id, 'location.href')
-		except Exception:  # noqa: BLE001
+		except Exception:
 			pass
 
 		click = await bound.client.call(spec.tool_click, {'index': idx}, timeout=90.0)
@@ -724,18 +724,18 @@ async def stale_test(bound: Bound, site_key: str) -> dict[str, Any]:
 
 		try:
 			counts = json.loads(await cdp_eval(bound.target_id, JS_COUNTS) or '{}')
-		except Exception:  # noqa: BLE001
+		except Exception:
 			counts = {}
 		rec['counts'] = counts
 		try:
 			rec['url_changed'] = (await cdp_eval(bound.target_id, 'location.href')) != url_before
-		except Exception:  # noqa: BLE001
+		except Exception:
 			rec['url_changed'] = None
 
 		rec['verdict'] = verdict_for(variant, rec)
 		try:
 			await cdp_eval(bound.target_id, JS_CLEANUP)
-		except Exception:  # noqa: BLE001
+		except Exception:
 			pass
 		out[variant] = rec
 	return out
@@ -814,7 +814,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 	try:
 		with urllib.request.urlopen(f'{CDP_URL}/json/version', timeout=10) as fh:  # noqa: ASYNC210 - метаданные и уборка, вне измеряемого пути
 			results['chrome'] = json.load(fh)
-	except Exception as exc:  # noqa: BLE001
+	except Exception as exc:
 		raise SystemExit(f'Chrome CDP not reachable at {CDP_URL}: {exc}. Run scripts/chrome-automation.sh')
 
 	try:
@@ -840,7 +840,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 					t0 = time.monotonic()
 					try:
 						rec = await measure_once(b, url)
-					except Exception as exc:  # noqa: BLE001
+					except Exception as exc:
 						rec = {'outcome': 'harness_error', 'error': f'{type(exc).__name__}: {exc}'}
 						results['errors'].append(f'{key}/{skey}/rep{rep}: {exc}')
 					rec.update({'server': key, 'site': skey, 'repeat': rep, 'cold': rep == 0})
@@ -863,7 +863,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 					try:
 						await b.client.call(b.spec.tool_navigate, {'url': url})
 						res = await stale_test(b, skey)
-					except Exception as exc:  # noqa: BLE001
+					except Exception as exc:
 						res = {'error': f'{type(exc).__name__}: {exc}'}
 						results['errors'].append(f'stale {key}/{skey}: {exc}')
 					results['stale'][skey][key] = res
@@ -883,7 +883,7 @@ async def run(args: argparse.Namespace) -> dict[str, Any]:
 				try:
 					urllib.request.urlopen(f'{CDP_URL}/json/close/{b.target_id}', timeout=10).read()  # noqa: ASYNC210 - метаданные и уборка, вне измеряемого пути
 					print(f'[bench] closed own tab {b.target_id[:8]}', file=sys.stderr)
-				except Exception as exc:  # noqa: BLE001
+				except Exception as exc:
 					print(f'[bench] WARN could not close own tab: {exc}', file=sys.stderr)
 		still = {t['id']: (t.get('url') or '') for t in cdp_pages()}
 		lost = [f'{tid[:8]} {u[:80]}' for tid, u in foreign_pages.items() if tid not in still]
@@ -905,7 +905,7 @@ def compose(server_key: str, text: str) -> dict[str, Any]:
 	block_tree = ''
 	try:
 		payload = json.loads(text)
-	except Exception:  # noqa: BLE001
+	except Exception:
 		payload, block_tree = split_header_and_tree(text)
 	if not isinstance(payload, dict):
 		return out
@@ -972,7 +972,7 @@ async def sample_pass(args: argparse.Namespace) -> dict[str, Any]:
 			if b.target_id and b.target_id not in foreign_pages:
 				try:
 					urllib.request.urlopen(f'{CDP_URL}/json/close/{b.target_id}', timeout=10).read()  # noqa: ASYNC210 - метаданные и уборка, вне измеряемого пути
-				except Exception:  # noqa: BLE001
+				except Exception:
 					pass
 	results['composition'] = comp
 	return results
@@ -1044,11 +1044,11 @@ def _dominant(vals: list[str]) -> str:
 	return max(counts.items(), key=rank)[0] if counts else 'ok'
 
 
-def fmt(v: Any, nd: int = 0) -> str:
+def fmt(v: Any, decimals: int = 0) -> str:
 	if v is None:
 		return '--'
 	if isinstance(v, float):
-		return f'{v:.{nd}f}' if nd else f'{v:.0f}'
+		return f'{v:.{decimals}f}' if decimals else f'{v:.0f}'
 	return str(v)
 
 
@@ -1084,7 +1084,7 @@ def build_report(results: dict[str, Any]) -> str:
 	for k, s in results['servers'].items():
 		env = ' '.join(f'{a}={b}' for a, b in s['env'].items())
 		cmd = f'{env} {" ".join(s["argv"])}'.strip().replace(results['python'], 'python')
-		A(f'| **{k}** | `{cmd}` | ' f'`{SERVERS[k].tool_state}` | `{SERVERS[k].tool_navigate}` | `{SERVERS[k].tool_click}` |')
+		A(f'| **{k}** | `{cmd}` | `{SERVERS[k].tool_state}` | `{SERVERS[k].tool_navigate}` | `{SERVERS[k].tool_click}` |')
 	A('')
 	A('Per site, per server, per repeat: `navigate(url)` then the state tool. Nothing else is')
 	A('called, and no site element is ever clicked.')
@@ -1271,10 +1271,7 @@ def build_report(results: dict[str, Any]) -> str:
 		A('')
 		wins = [s for s in ok_sites if agg[f'{s}|ours']['cpe'] < agg[f'{s}|stock']['cpe']]
 		losses = [s for s in ok_sites if agg[f'{s}|ours']['cpe'] >= agg[f'{s}|stock']['cpe']]
-		A(
-			f'bu_mcp has the lower chars/element on **{len(wins)}/{len(ok_sites)}** sites '
-			f'({", ".join(wins) if wins else "none"}).'
-		)
+		A(f'bu_mcp has the lower chars/element on **{len(wins)}/{len(ok_sites)}** sites ({", ".join(wins) if wins else "none"}).')
 		if losses:
 			A('')
 			A(f'It **loses** on {len(losses)}: {", ".join(losses)}.')

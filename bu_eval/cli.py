@@ -43,9 +43,7 @@ def cmd_doctor(args) -> int:
 		print(('  OK    ' if c.ok else '  СЛОМ  ') + f'{c.name:32} {c.detail}')
 		bad += not c.ok
 	if bad:
-		print(
-			f'\nСломано допущений: {bad}. Смотри bu_eval/upstream.py — там написано, ' f'на что именно мы опирались и что чинить.'
-		)
+		print(f'\nСломано допущений: {bad}. Смотри bu_eval/upstream.py — там написано, на что именно мы опирались и что чинить.')
 	return 1 if bad else 0
 
 

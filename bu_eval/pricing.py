@@ -39,14 +39,14 @@ def prices(refresh: bool = False) -> dict:
 		try:
 			_MEM = json.loads(CACHE.read_text())
 			return _MEM
-		except Exception:  # noqa: BLE001 — битый кэш не повод падать, перекачаем
+		except Exception:  # — битый кэш не повод падать, перекачаем
 			pass
 
 	try:
 		_MEM = _fetch()
 		CACHE.parent.mkdir(parents=True, exist_ok=True)
 		CACHE.write_text(json.dumps(_MEM))
-	except Exception:  # noqa: BLE001
+	except Exception:
 		# сети нет — лучше просроченный кэш, чем ничего
 		_MEM = json.loads(CACHE.read_text()) if CACHE.exists() else {}
 	return _MEM
