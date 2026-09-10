@@ -36,6 +36,27 @@ if TYPE_CHECKING:
 	from .mouse import Mouse
 
 
+def _runtime_enable_wanted() -> bool:
+	"""Включать ли CDP-домен ``Runtime`` при подключении к странице.
+
+	По умолчанию НЕ включаем. ``Runtime.enable`` — заметный маркер автоматизации:
+	после него страница может обнаружить отладчик, и антибот-проверки этим
+	пользуются. Замер на стендах: `bot.sannysoft.com` мы проходили и с ним, а
+	`nowsecure.nl` (демо-сайт nodriver, специально ловящий CDP) — нет.
+
+	Функциональность при этом не теряется. ``Runtime.evaluate`` и
+	``Runtime.callFunctionOn`` работают и без ``enable`` — домен нужен только для
+	СОБЫТИЙ (``consoleAPICalled``, ``executionContextCreated``). Всё, что мы
+	делаем со страницей, — вызовы, а не подписки.
+
+	``BU_RUNTIME_ENABLE=1`` возвращает прежнее поведение, если понадобятся
+	события Runtime.
+	"""
+	import os
+
+	return os.getenv('BU_RUNTIME_ENABLE', '0').strip().lower() in ('1', 'true', 'yes', 'on')
+
+
 class Page:
 	"""Page operations (tab or iframe)."""
 
@@ -60,12 +81,14 @@ class Page:
 			# Enable necessary domains
 			import asyncio
 
-			await asyncio.gather(
+			domains = [
 				self._client.send.Page.enable(session_id=self._session_id),
 				self._client.send.DOM.enable(session_id=self._session_id),
-				self._client.send.Runtime.enable(session_id=self._session_id),
 				self._client.send.Network.enable(session_id=self._session_id),
-			)
+			]
+			if _runtime_enable_wanted():
+				domains.append(self._client.send.Runtime.enable(session_id=self._session_id))
+			await asyncio.gather(*domains)
 
 		return self._session_id
 
