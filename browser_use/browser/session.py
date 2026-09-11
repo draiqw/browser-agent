@@ -173,6 +173,70 @@ async def _automation_chrome_pid() -> str:
 	return _AUTOMATION_PID
 
 
+_FOCUS_GUARD: Any = None
+
+
+async def start_focus_guard() -> None:
+	"""Сторож фокуса на всё время работы сессии.
+
+	Почему не разовая сверка вокруг каждой операции. Chrome поднимает окно не в
+	момент CDP-вызова, а когда ему удобно: замерено на живом прогоне smoke —
+	окно выходило вперёд и держало фокус 7 секунд, уже после того как обёртка
+	вокруг операции отработала и решила, что всё в порядке.
+
+	Почему ОДИН процесс osascript с циклом внутри, а не цикл в питоне. Спавн
+	osascript стоит ~150 мс — шелловый опрос медленнее той кражи, которую ловит
+	(та же причина, по которой сторож запуска в chrome-automation.sh устроен
+	именно так). Внутри цикла 0.05 с, то есть окно не успевает появиться.
+
+	Куда возвращать фокус, сторож решает сам: помнит последнее приложение,
+	которое было впереди и не является нашим Chrome. Владелец ушёл в другую
+	программу — фокус вернётся именно туда, а не туда, где он был на старте.
+	"""
+	global _FOCUS_GUARD
+	if sys.platform != 'darwin' or _activation_allowed():
+		return
+	if _FOCUS_GUARD is not None and _FOCUS_GUARD.returncode is None:
+		return
+	ours = await _automation_chrome_pid()
+	if not ours:
+		return
+	script = (
+		'set target to ""\n'
+		'tell application "System Events"\n'
+		'  repeat 24000 times\n'
+		'    try\n'
+		'      set f to first process whose frontmost is true\n'
+		'      set fid to (unix id of f) as string\n'
+		f'      if fid is "{ours}" then\n'
+		'        if target is not "" then\n'
+		'          set frontmost of (first process whose unix id is (target as integer)) to true\n'
+		'        end if\n'
+		'      else\n'
+		'        set target to fid\n'
+		'      end if\n'
+		'    end try\n'
+		'    delay 0.05\n'
+		'  end repeat\n'
+		'end tell'
+	)
+	with contextlib.suppress(Exception):
+		_FOCUS_GUARD = await asyncio.create_subprocess_exec(
+			'osascript', '-e', script, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
+		)
+
+
+async def stop_focus_guard() -> None:
+	"""Погасить сторожа: сессия кончилась, красть фокус больше некому."""
+	global _FOCUS_GUARD
+	proc, _FOCUS_GUARD = _FOCUS_GUARD, None
+	if proc is None or proc.returncode is not None:
+		return
+	with contextlib.suppress(Exception):
+		proc.terminate()
+		await asyncio.wait_for(proc.wait(), timeout=2)
+
+
 @contextlib.asynccontextmanager
 async def preserve_frontmost():
 	"""Страховка на случай, если фокус всё же уехал.
@@ -276,31 +340,6 @@ async def preserve_frontmost():
 				'end tell'
 			)
 			_WE_TOOK_FRONT = verdict.strip() == 'took'
-
-			# Догоняющая проверка. Одной сверки мало: окно Chrome поднимается не в
-			# момент CDP-вызова, а спустя мгновение после него, и мы успеваем
-			# «вернуть» фокус ДО того, как его заберут. Замерено на живом прогоне:
-			# окно выходило вперёд через ~10 с после старта и держало фокус 8 с.
-			# Поэтому ещё несколько раз в фоне смотрим, не вылез ли он, и
-			# возвращаем фокус владельцу. Фоном — чтобы не платить задержкой в
-			# каждом действии.
-			async def _catch_up(target: str) -> None:
-				for delay in (0.4, 0.7, 1.2):
-					await asyncio.sleep(delay)
-					again = await osa(
-						'tell application "System Events"\n'
-						f'  if unix id of (first process whose frontmost is true) is {ours} then\n'
-						f'    set frontmost of (first process whose unix id is {target}) to true\n'
-						'    return "took"\n'
-						'  end if\n'
-						'  return "idle"\n'
-						'end tell'
-					)
-					if again.strip() != 'took':
-						return
-
-			with contextlib.suppress(Exception):
-				asyncio.get_running_loop().create_task(_catch_up(was))
 
 
 class Target(BaseModel):
@@ -955,6 +994,7 @@ class BrowserSession(BaseModel):
 	@observe_debug(ignore_input=True, ignore_output=True, name='browser_session_start')
 	async def start(self) -> None:
 		"""Start the browser session."""
+		await start_focus_guard()
 		start_event = self.event_bus.dispatch(BrowserStartEvent())
 		await start_event
 		# Ensure any exceptions from the event handler are propagated
@@ -1002,6 +1042,7 @@ class BrowserSession(BaseModel):
 		await self.event_bus.stop(clear=True, timeout=5)
 		# Reset all state
 		await self.reset()
+		await stop_focus_guard()
 		# Create fresh event bus
 		self.event_bus = ResilientEventBus()
 

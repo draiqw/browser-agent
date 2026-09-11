@@ -101,16 +101,32 @@ running_mode() {
 
 cdp_up() { curl -s -o /dev/null -m 2 "http://127.0.0.1:$PORT/json/version" }
 
+# Грязный профиль — это окно «Something went wrong when opening your profile»
+# при следующем запуске. Появляется оно не само по себе: Chrome дописывает
+# профиль при выходе, и если не дать ему на это времени, останутся замок
+# SingletonLock от мёртвого процесса и недописанный Local State.
+clean_stale_lock() {
+  local lock="$DIR/SingletonLock"
+  [[ -L "$lock" ]] || return 0
+  # Ссылка вида <хост>-<pid>. Живой владелец — не трогаем.
+  local owner="${$(readlink "$lock")##*-}"
+  [[ "$owner" == <-> ]] && kill -0 "$owner" 2>/dev/null && return 0
+  rm -f "$lock" "$DIR/SingletonCookie" "$DIR/SingletonSocket" 2>/dev/null
+}
+
 stop_chrome() {
   local pids=(${(f)"$(browser_pids)"})
   (( ${#pids} )) || return 0
   kill ${pids} 2>/dev/null
-  for i in {1..20}; do
-    (( ${#${(f)"$(browser_pids)"}} )) || return 0
+  # 15 секунд, а не 5: Chrome закрывает профиль не мгновенно, а SIGKILL посреди
+  # записи и есть источник грязного профиля.
+  for i in {1..60}; do
+    (( ${#${(f)"$(browser_pids)"}} )) || { clean_stale_lock; return 0 }
     sleep 0.25
   done
   kill -9 ${pids} 2>/dev/null
   sleep 1
+  clean_stale_lock
 }
 
 wait_cdp() {
@@ -196,6 +212,7 @@ start_hidden() {
   # которая должна была тихо поднять наш экземпляр, выносила вперёд чужое окно.
   # Прямой запуск бинарника в LaunchServices не заходит и чужой Chrome не трогает.
   local was=$(frontmost_app)
+  clean_stale_lock
   "$CHROME" ${common_args} ${awake_args} ${window_args} >/dev/null 2>&1 &
   disown
 
@@ -238,6 +255,7 @@ EOS
 }
 
 start_headless() {
+  clean_stale_lock
   "$CHROME" ${common_args} --headless=new >/dev/null 2>&1 &
   disown
 }

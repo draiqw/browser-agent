@@ -932,6 +932,18 @@ _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 # --------------------------------------------------------------------------- #
 
 
+def _cdp_reachable(cdp_url: str, timeout: float = 2.0) -> bool:
+	"""Отвечает ли на этом адресе живой CDP. Fail closed: сомнение — значит нет."""
+	import urllib.request
+
+	url = cdp_url.rstrip('/') + '/json/version'
+	try:
+		with urllib.request.urlopen(url, timeout=timeout) as resp:
+			return resp.status == 200
+	except Exception:
+		return False
+
+
 class BuMcpServer:
 	"""MCP-фасад над browser-use: реестр действий + пять переопределений."""
 
@@ -1129,6 +1141,18 @@ class BuMcpServer:
 				await self._drop_session()
 			if self._session is None:
 				cdp_url = os.getenv('BU_MCP_CDP_URL', 'http://127.0.0.1:9222')
+				# Живой ли CDP — спрашиваем САМИ, до создания сессии. Иначе решение
+				# принимает browser-use, а у него на этот случай есть запасной путь:
+				# поднять свой Chromium из кеша playwright. Это худший из возможных
+				# исходов — вместо нашего профиля с логинами появляется чужой пустой
+				# браузер, у владельца выскакивает окно, а агент считает, что всё в
+				# порядке, и работает не в том браузере. Лучше честный отказ.
+				if not _cdp_reachable(cdp_url):
+					raise ToolError(
+						f'No Chrome with an open CDP at {cdp_url}. Nothing was done: bu-mcp never launches a '
+						f'browser of its own, it only attaches to the one you run. Start it with '
+						f'`scripts/chrome-automation.sh start` (add --profile NAME for a non-default profile).'
+					)
 				profile = self._profile(cdp_url)
 				session = BrowserSession(browser_profile=profile)
 				await session.start()
