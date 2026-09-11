@@ -128,6 +128,13 @@ def create_target_params(params: 'CreateTargetParameters') -> 'CreateTargetParam
 
 _AUTOMATION_PID: str | None = None
 
+#: Последнее приложение владельца, которое мы видели впереди, и признак того,
+#: что вперёд вылез именно наш Chrome. Нужны из-за дыры в защите: она
+#: запоминает фронтмост ДО операции, и если наш Chrome уже там, «возврат
+#: фокуса» отдаёт его Chrome же. Один раз вылезши вперёд, окно так и висит.
+_LAST_FOREIGN_FRONT: str = ''
+_WE_TOOK_FRONT: bool = False
+
 
 async def _automation_chrome_pid() -> str:
 	"""PID Chrome, к которому мы подключены, — по порту из ``BU_MCP_CDP_URL``.
@@ -213,8 +220,17 @@ async def preserve_frontmost():
 		yield
 		return
 
+	global _LAST_FOREIGN_FRONT, _WE_TOOK_FRONT
 	front = 'tell application "System Events" to unix id of first process whose frontmost is true'
 	was = await osa(front)
+	if was.isdigit() and was != ours:
+		_LAST_FOREIGN_FRONT = was
+		_WE_TOOK_FRONT = False
+	elif was == ours and _WE_TOOK_FRONT and _LAST_FOREIGN_FRONT:
+		# Впереди наш Chrome, и оказался он там не по воле владельца, а с прошлой
+		# операции. Возвращать фокус «предыдущему» бессмысленно — это мы и есть;
+		# целимся в последнее приложение владельца.
+		was = _LAST_FOREIGN_FRONT
 	try:
 		yield
 	finally:
@@ -243,15 +259,23 @@ async def preserve_frontmost():
 			# Если он НЕ впереди — наоборот, прячем: окно иначе так и висит на
 			# экране после работы. Скрытие фонового приложения фокус не трогает,
 			# это проверено отдельно.
-			await osa(
+			#
+			# Скрипт ещё и отвечает, пришлось ли возвращать фокус. Ответ нужен
+			# следующей обёртке: если вперёд вылезли мы, ей нельзя «возвращать
+			# фокус предыдущему» — предыдущий это мы же. Спрашивать отдельным
+			# вызовом osascript нельзя, это те самые ~150 мс мигания.
+			verdict = await osa(
 				'tell application "System Events"\n'
 				f'  if unix id of (first process whose frontmost is true) is {ours} then\n'
 				f'    set frontmost of (first process whose unix id is {was}) to true\n'
+				'    return "took"\n'
 				'  else\n'
 				f'    set visible of (first process whose unix id is {ours}) to false\n'
+				'    return "idle"\n'
 				'  end if\n'
 				'end tell'
 			)
+			_WE_TOOK_FRONT = verdict.strip() == 'took'
 
 
 class Target(BaseModel):

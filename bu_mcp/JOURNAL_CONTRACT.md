@@ -4,7 +4,8 @@
 повторяемый сценарий, выполняемый **без модели в цикле**.
 
 Опора: `resolve.py` уже умеет переидентификацию (backendNodeId → xpath →
-accessible name → уникальный атрибут) с гардом по смене URL и по несовпадению
+accessible name → уникальный атрибут → похожее имя) с гардом по смене URL и по
+несовпадению
 accessible name, и `describe_handle` возвращает составной хендл, который
 принимается обратно как `hint`. Повтор строится на этом, а не на индексах.
 
@@ -50,7 +51,7 @@ accessible name, и `describe_handle` возвращает составной х
     macro.run(..., from_step=1, auto_start=True)
 
 Запись `tool: 'macro_mark'` — закладка, в макрос не попадает. Запись
-`tool: 'checkpoint'` (`params`: `text` / `not_text` / `url` / `timeout` / `note`) —
+`tool: 'checkpoint'` (`params`: `text` / `not_text` / `url` / `download` / `timeout` / `note`) —
 единственное наблюдение, которое журналируется: при повторе это шаг-проверка,
 и `timeout` у него остаётся в макросе как часть смысла шага.
 
@@ -61,6 +62,19 @@ accessible name, и `describe_handle` возвращает составной х
 одного пути).
 
 MCP: `macro_record(action=start|stop|status, name, save, replace_from)`,
-`checkpoint(text, not_text, url, timeout, note)`, `macro_save(..., replace_from)`,
+`checkpoint(text, not_text, url, download, timeout, note)`, `macro_save(..., replace_from)`,
 `macro_run(..., from_step, new_tab)`. CLI без сервера и модели:
 `python -m bu_mcp.macro run NAME [--var k=v] [--from N] [--no-strict] [--json]`.
+
+Скачанное складывается в `bu_mcp/downloads/` (`BU_MCP_DOWNLOAD_DIR`). Условие
+`checkpoint(download=true|".png")` сверяет папку с её состоянием ПЕРЕД действием
+(`downloads.mark_baseline()` зовётся на каждое действие и на сервере, и в
+`macro._act`): загрузка успевает закончиться раньше, чем стартует проверка, и
+снимок «на момент проверки» показал бы новый файл как лежавший всегда.
+
+Ступень `similar_name` — последняя в лестнице: имя совпало не точно, а на 80%
+по словам, и только для фразовых имён от четырёх слов при ЕДИНСТВЕННОМ
+кандидате. Нужна там, где имя элемента порождено содержимым и каждый прогон
+другое (описание сгенерированной картинки). Обычное переименование контрола
+(«macro button» → «macro button v2») под неё не подпадает и по-прежнему валит
+повтор с предложением починки.

@@ -760,6 +760,14 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 			},
 			'not_text': {'type': 'string', 'description': 'This text must NOT be on the page.'},
 			'url': {'type': 'string', 'description': 'The page URL must contain this substring.'},
+			'download': {
+				'description': (
+					'A new file must land in the download folder (bu_mcp/downloads, or BU_MCP_DOWNLOAD_DIR). '
+					'true = any file; a string = its name must contain that fragment, e.g. ".png". Use this after '
+					'clicking a download control: the click only starts the transfer, this proves it finished.'
+				),
+				'anyOf': [{'type': 'boolean'}, {'type': 'string'}],
+			},
 			'timeout': {
 				'type': 'number',
 				'default': 20,
@@ -893,7 +901,7 @@ _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 	),
 	'checkpoint': (
 		'Assert something about the page and wait for it: `text` is present, `not_text` is absent, `url` contains '
-		'a substring. Polls until the condition holds or `timeout` runs out, then FAILS loudly. Use it after any '
+		'a substring, `download` — a new file reached the download folder. Polls until the condition holds or `timeout` runs out, then FAILS loudly. Use it after any '
 		'action whose result arrives later (a reply being generated, a search, a redirect). It is journalled and '
 		'becomes a validation step of the macro: on replay the same check runs with the same timeout, and a '
 		'replay that does not reach the expected state stops there instead of clicking on.'
@@ -1060,7 +1068,10 @@ class BuMcpServer:
 		Для ветки запуска (``cdp_url`` пуст) не трогаем ничего: там viewport
 		описывает НАШ браузер и обязан работать штатно.
 		"""
-		profile = BrowserProfile(cdp_url=cdp_url, is_local=True, headless=cls._headless())
+		# Скачанное кладём в известную папку, а не во временный каталог со
+		# случайным именем: результат работы должен лежать там, где его найдут.
+		downloads = str(_bu_mcp('downloads').download_dir())
+		profile = BrowserProfile(cdp_url=cdp_url, is_local=True, headless=cls._headless(), downloads_path=downloads)
 		if cdp_url and profile.viewport is not None and not profile.no_viewport:
 			try:
 				profile.viewport = None
@@ -1861,6 +1872,13 @@ class BuMcpServer:
 		"""
 		entry = self._journal_open(tool, args)
 		token = _JOURNAL_ENTRY.set(entry)
+		if tool != 'checkpoint':
+			# Точка отсчёта для «что скачалось»: до действия, а не до проверки.
+			# Сам чекпоинт её не сдвигает — иначе он затирал бы то, что измеряет.
+			try:
+				_bu_mcp('downloads').mark_baseline()
+			except Exception:
+				pass
 		try:
 			return await run(args)
 		except NoopResultError as exc:
@@ -3064,7 +3082,7 @@ class BuMcpServer:
 			) from exc
 		url = verdict.get('url') or await self._current_url()
 		self._journal_note(url_after=url)
-		summary = ', '.join(f'{k}={v!r}' for k, v in spec.items() if k in ('text', 'not_text', 'url'))
+		summary = ', '.join(f'{k}={v!r}' for k, v in spec.items() if k in ('text', 'not_text', 'url', 'download'))
 		return self._text(
 			{
 				'action': f'Checkpoint held after {verdict.get("waited")}s: {summary}.',
@@ -3072,6 +3090,7 @@ class BuMcpServer:
 				'waited': verdict.get('waited'),
 				'attempts': verdict.get('attempts'),
 				'snippet': verdict.get('snippet'),
+				'downloaded': verdict.get('downloaded'),
 				'timeout': spec.get('timeout'),
 			},
 			compact=True,

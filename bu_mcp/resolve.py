@@ -140,7 +140,7 @@ _IDENTIFYING_ATTRS = (
 _VOLATILE_ATTRS = ('id', 'name')
 
 # Ступени лестницы, в порядке применения.
-_LADDER = ('backend_node_id', 'xpath', 'accessible_name', 'attribute')
+_LADDER = ('backend_node_id', 'xpath', 'accessible_name', 'attribute', 'similar_name')
 
 _GENERATOR_PREFIXES = frozenset(
 	{
@@ -436,6 +436,19 @@ def _ident_editable(ident: dict[str, Any]) -> bool:
 	return role in _EDITABLE_ROLES
 
 
+def _name_similarity(a: str, b: str) -> float:
+	"""Доля общих слов у двух имён: 1.0 — совпали, 0.0 — ничего общего.
+
+	Слова, а не символы: имя элемента обычно фраза («Generated image: Red Circle
+	and Blue Rectangle»), и устойчивая её часть — именно слова, а не порядок.
+	"""
+	wa = {w for w in re.split(r'[^\w]+', a.casefold()) if w}
+	wb = {w for w in re.split(r'[^\w]+', b.casefold()) if w}
+	if not wa or not wb:
+		return 0.0
+	return len(wa & wb) / max(len(wa), len(wb))
+
+
 def _tag_compatible(node: EnhancedDOMTreeNode, ident: dict[str, Any]) -> bool:
 	"""Как ``_tag_ok``, но допускает подмену тега в классе полей ввода текста.
 
@@ -553,6 +566,36 @@ def _candidates_for_level(
 			found.append((i, n))
 		role_note = f' role={want_role}' if want_role else ''
 		return found, f'accessible name={want!r}{role_note}'
+
+	if level == 'similar_name':
+		# Последняя ступень: имя ПОХОЖЕ, а не совпало. Нужна она там, где имя
+		# элемента порождено содержимым и от прогона к прогону другое: у картинки,
+		# сгенерированной моделью, accessible name — её же описание («Generated
+		# image: Minimalist Red Circle...» против «...: Red Circle...»), так что
+		# точное сравнение не сработает никогда. Ступень остаётся честной за счёт
+		# двух ограничений: роль и класс тега обязаны совпасть, а кандидат должен
+		# быть ЕДИНСТВЕННЫМ — двое похожих означают отказ, как и везде в этом слое.
+		want = (ident.get('accessible_name') or '').strip()
+		# Порог и длина подобраны так, чтобы ступень НЕ срабатывала на обычном
+		# переименовании контрола («macro button» -> «macro button v2»): такое
+		# обязано валить повтор и звать на починку. Фразовое имя из четырёх и
+		# более слов, совпавшее на 80% — это уже не переименование, а то же самое
+		# описание того же объекта с другой редакцией содержимого.
+		if len(want.split()) < 4:
+			return [], ''
+		want_role = ident.get('role')
+		found = []
+		for i, n in items:
+			ax = getattr(n, 'ax_node', None)
+			if ax is None or not (ax.name or '').strip():
+				continue
+			if not _tag_compatible(n, ident):
+				continue
+			if want_role and ax.role and ax.role != want_role:
+				continue
+			if len((ax.name or '').split()) >= 4 and _name_similarity(want, ax.name) >= 0.8:
+				found.append((i, n))
+		return found, f'accessible name similar to {want!r}'
 
 	if level == 'attribute':
 		attrs = ident.get('attributes') or {}

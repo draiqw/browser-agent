@@ -91,3 +91,7 @@ bu_mcp/__pycache__/
 # Папка вложений: рабочие файлы пользователя, не код. Сам README оставляем.
 bu_mcp/uploads/*
 !bu_mcp/uploads/README.md
+
+# скачанное: файлы не в git, папка — есть
+bu_mcp/downloads/*
+!bu_mcp/downloads/README.md

@@ -276,9 +276,26 @@ def _consequence(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any
 # Чекпоинт: условие на странице, которого ждём
 # --------------------------------------------------------------------------- #
 
+#: К innerText добавляем подписи элементов (aria-label, alt, title, value кнопок).
+#: Без них агент не может проверить то, что сам видит: в дереве browser_state
+#: имя элемента берётся из accessible name, и «файл приложен» на многих сайтах
+#: выражено ровно так — `aria-label="Remove file 1: photo.png"`, а в тексте
+#: страницы этого нет вообще.
 _CHECKPOINT_JS = """(() => {
   const body = document.body ? (document.body.innerText || '') : '';
-  return { url: location.href, title: document.title || '', text: body.slice(0, 400000) };
+  const labels = [];
+  try {
+    const nodes = document.querySelectorAll('[aria-label], [alt], [title]');
+    for (let i = 0; i < nodes.length && labels.length < 4000; i++) {
+      const el = nodes[i];
+      for (const attr of ['aria-label', 'alt', 'title']) {
+        const v = el.getAttribute(attr);
+        if (v) labels.push(v);
+      }
+    }
+  } catch (e) {}
+  const text = (body + '\\n' + labels.join('\\n')).slice(0, 400000);
+  return { url: location.href, title: document.title || '', text: text, labels: labels.length };
 })()"""
 
 
@@ -303,9 +320,22 @@ def checkpoint_spec(params: dict[str, Any] | None) -> dict[str, Any]:
 		if not value.strip():
 			raise ValueError(f'checkpoint: `{key}` is blank')
 		spec[key] = value
+	# `download` — условие не на странице, а на диске: в папке скачанного появился
+	# новый файл. Нужно оно потому, что «скачалось» кнопка на странице не
+	# подтверждает: она только запускает загрузку, а дошла ли та до файла — видно
+	# лишь в файловой системе.
+	raw_download = params.get('download')
+	if raw_download not in (None, '', False):
+		if raw_download is True:
+			spec['download'] = True
+		elif isinstance(raw_download, str) and raw_download.strip():
+			spec['download'] = raw_download.strip()
+		else:
+			raise ValueError('checkpoint: `download` must be true or a name fragment like ".png"')
 	if not spec:
 		raise ValueError(
-			'checkpoint needs at least one of `text`, `not_text`, `url` — a checkpoint with no condition is just a pause'
+			'checkpoint needs at least one of `text`, `not_text`, `url`, `download` — '
+			'a checkpoint with no condition is just a pause'
 		)
 	raw_timeout = params.get('timeout')
 	timeout = DEFAULT_CHECKPOINT_TIMEOUT if raw_timeout in (None, '') else float(raw_timeout)
@@ -379,6 +409,8 @@ async def checkpoint(
 	"""
 	spec = checkpoint_spec(params)
 	budget = spec['timeout'] if timeout is None else float(timeout)
+	downloads_mod = importlib.import_module('bu_mcp.downloads') if 'download' in spec else None
+	before_files = downloads_mod.baseline() if downloads_mod else set()
 	started = time.monotonic()
 	deadline = started + budget
 	attempts = 0
@@ -393,6 +425,21 @@ async def checkpoint(
 		if not isinstance(page, dict):
 			raise StepFailed('checkpoint: the page probe returned nothing readable')
 		last_failed, last_seen = _checkpoint_verdict(spec, page)
+		if downloads_mod is not None:
+			want = spec['download']
+			fresh = [
+				f for f in downloads_mod.new_since(before_files) if want is True or str(want).casefold() in f.name.casefold()
+			]
+			if fresh:
+				last_seen['downloaded'] = [downloads_mod.describe(f) for f in fresh]
+			else:
+				last_failed.append(
+					{
+						'field': 'download',
+						'expected': 'a new file in the download folder' + ('' if want is True else f' matching {want!r}'),
+						'observed': f'nothing new in {downloads_mod.download_dir()}',
+					}
+				)
 		waited = round(time.monotonic() - started, 3)
 		if not last_failed:
 			out: dict[str, Any] = {'ok': True, 'attempts': attempts, 'waited': waited, 'spec': spec, **last_seen}
@@ -688,7 +735,7 @@ def _mask(macro: dict[str, Any], values: dict[str, Any]) -> dict[str, Any]:
 # --------------------------------------------------------------------------- #
 
 
-def _identity_mismatch(node: Any, hint: dict[str, Any]) -> str | None:
+def _identity_mismatch(node: Any, hint: dict[str, Any], level: str | None = None) -> str | None:
 	"""Тот ли это элемент. Возвращает описание расхождения или ``None``.
 
 	Лестница переидентификации сама по себе может закончиться на ступени, где
@@ -710,7 +757,12 @@ def _identity_mismatch(node: Any, hint: dict[str, Any]) -> str | None:
 	want_name = (hint.get('accessible_name') or '').strip()
 	got_name = ((ax.name if ax else None) or '').strip()
 	if want_name and got_name and want_name != got_name:
-		return f'expected accessible name {want_name!r}, resolved element is named {got_name!r}'
+		# Ступень `similar_name` для того и существует, что имя элемента порождено
+		# содержимым и каждый прогон другое. Требовать здесь точного совпадения —
+		# значит отменить её целиком. Гарантии не теряются: та ступень пускает
+		# только единственного кандидата с той же ролью и совместимым тегом.
+		if level != 'similar_name':
+			return f'expected accessible name {want_name!r}, resolved element is named {got_name!r}'
 	if want_name and not got_name:
 		return f'expected accessible name {want_name!r}, resolved element has no accessible name'
 
@@ -768,7 +820,12 @@ async def _resolve_step(
 		except Exception as exc:
 			raise StepFailed(f'cannot resolve the recorded element: {type(exc).__name__}: {exc}') from exc
 
-		mismatch = _identity_mismatch(node, hint)
+		resolved_level = None
+		try:
+			resolved_level = (resolve_mod.last_resolution(session) or {}).get('level')
+		except Exception:
+			resolved_level = None
+		mismatch = _identity_mismatch(node, hint, resolved_level)
 		if mismatch is not None:
 			raise StepFailed(
 				f'WRONG ELEMENT: re-identification returned an element that does not match the recorded '
@@ -918,6 +975,12 @@ async def _ensure_target(session: Any, home: Any) -> str | None:
 
 async def _act(session: Any, tool: str, params: dict[str, Any], node: Any, live_index: int | None) -> str:
 	"""Выполнить одно действие макроса."""
+	try:
+		# Та же точка отсчёта, что и на записи: чекпоинт про скачивание сравнивает
+		# папку с тем, какой она была ПЕРЕД действием.
+		importlib.import_module('bu_mcp.downloads').mark_baseline()
+	except Exception:
+		pass
 	name = _REGISTRY_ALIAS.get(tool, tool)
 	if name == 'hover':
 		if node is None:
@@ -1375,7 +1438,10 @@ async def _cli_run(args: Any) -> int:
 		return 2
 
 	url = cdp_url(args.cdp, profile=args.profile)
-	session = BrowserSession(browser_profile=BrowserProfile(cdp_url=url, is_local=True))
+	# Та же папка скачанного, что и у сервера: повтор без модели должен класть
+	# результат туда же, куда клал обучающий прогон.
+	downloads_dir = str(importlib.import_module('bu_mcp.downloads').download_dir())
+	session = BrowserSession(browser_profile=BrowserProfile(cdp_url=url, is_local=True, downloads_path=downloads_dir))
 	try:
 		await session.start()
 	except Exception as exc:

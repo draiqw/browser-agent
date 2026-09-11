@@ -128,6 +128,18 @@ CLI и штатном MCP-сервере.
 `viewport=None`, `no_viewport=True`: чужой вьюпорт мы не трогаем. Для ветки
 запуска viewport остаётся штатным.
 
+### Папка скачанного (bu_mcp/downloads.py)
+
+    def download_dir() -> Path            # bu_mcp/downloads, или BU_MCP_DOWNLOAD_DIR
+    def list_files() -> list[Path]        # свежие первыми, .crdownload не показываем
+    def mark_baseline() -> None           # снимок ПЕРЕД действием
+    def baseline() -> set[str]            # с чем сравнивать «что скачалось»
+    def new_since(before: set[str]) -> list[Path]
+    def describe(path: Path) -> dict      # имя, размер, путь
+
+Путь передаётся в `BrowserProfile(downloads_path=...)` и сервером, и CLI повтора,
+иначе скачанное уезжает во временный каталог со случайным именем.
+
 ### Журнал действий и макросы (JOURNAL_CONTRACT.md)
 
 Каждое действие, МЕНЯЮЩЕЕ состояние, пишется в журнал: `browser_click`,
