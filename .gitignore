@@ -88,3 +88,6 @@ plot.py
 
 # bu_mcp
 bu_mcp/__pycache__/
+# Папка вложений: рабочие файлы пользователя, не код. Сам README оставляем.
+bu_mcp/uploads/*
+!bu_mcp/uploads/README.md

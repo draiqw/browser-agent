@@ -884,6 +884,15 @@ def to_macro(entries: list[dict[str, Any]], *, name: str) -> dict[str, Any]:
 			)
 			params['text'] = {'$var': var}
 
+		if tool in ('upload_file', 'upload'):
+			# Имя файла в папке вложений — переменная сценария: тот же макрос
+			# можно прогнать с другим файлом, положив его в папку и передав имя.
+			# Абсолютных путей тут не бывает по построению (server кладёт имя).
+			fname = params.get('file') or params.get('path') or ''
+			var = pool.add('attachment', str(fname), source='file in the upload folder', secret=False)
+			params.pop('path', None)
+			params['file'] = {'$var': var}
+
 		nav_url: str | None = None
 		if tool in ('browser_navigate', 'navigate'):
 			url = params.get('url')

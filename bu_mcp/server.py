@@ -168,6 +168,9 @@ BRIDGE_EXCLUDE = frozenset(
 		'click',
 		'input',
 		'screenshot',
+		# У upload_file свой серверный обработчик: он берёт файл из папки
+		# вложений по имени, сам находит скрытый file input и журналирует шаг.
+		'upload_file',
 	}
 )
 
@@ -539,6 +542,7 @@ JOURNALED_TOOLS = frozenset(
 		'select_dropdown',
 		'send_keys',
 		'scroll',
+		'upload_file',
 		# Единственное наблюдение в журнале: это не разведка, а заявленное
 		# агентом условие, которое при повторе становится шагом-проверкой.
 		'checkpoint',
@@ -725,6 +729,27 @@ _OVERRIDE_SCHEMAS: dict[str, dict[str, Any]] = {
 		},
 		'required': ['action'],
 	},
+	'upload_file': {
+		'type': 'object',
+		'properties': {
+			'file': {
+				'type': 'string',
+				'description': (
+					'Name of a file INSIDE the upload folder (bu_mcp/uploads by default, or BU_MCP_UPLOAD_DIR), '
+					'e.g. "report.pdf" or "pics/logo.png". Only files in that folder can be attached; nothing else '
+					'on the machine is reachable. Call with no file to list what is available.'
+				),
+			},
+			'index': {
+				'type': 'integer',
+				'description': (
+					'Optional element index to attach near (a paperclip / attach control). Usually omit: the '
+					'hidden file input is found automatically. On ChatGPT, focus or click the composer first so '
+					'the input is mounted.'
+				),
+			},
+		},
+	},
 	'checkpoint': {
 		'type': 'object',
 		'properties': {
@@ -856,6 +881,14 @@ _OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 		'collapsed away); then action=stop saves the macro from exactly that stretch of the journal, so nobody has '
 		'to count journal positions. To repair a macro that failed at step N: macro_record start with the same '
 		'name, redo the work from step N on, then stop with replace_from=N.'
+	),
+	'upload_file': (
+		'Attach a file to the page from the upload folder (bu_mcp/uploads, or BU_MCP_UPLOAD_DIR). Pass `file` as '
+		'a name inside that folder — only its contents can be attached, the rest of the machine is off limits. '
+		'The hidden <input type=file> is set directly (DOM.setFileInputFiles), so no OS dialog opens and it works '
+		'in a background tab; you do not need to click the paperclip, though on ChatGPT the composer must be '
+		'focused first so the input exists. Call with no `file` to list what is in the folder. Journalled, so it '
+		'replays in a macro; the file name becomes a variable you can override at run time.'
 	),
 	'checkpoint': (
 		'Assert something about the page and wait for it: `text` is present, `not_text` is absent, `url` contains '
@@ -1248,7 +1281,7 @@ class BuMcpServer:
 				args,
 				browser_session=session,
 				file_system=self._file_system,
-				available_file_paths=[],
+				available_file_paths=_bu_mcp('uploads').allowed_files(),
 			)
 		except ToolError:
 			raise
@@ -3023,6 +3056,144 @@ class BuMcpServer:
 			compact=True,
 		)
 
+	# --- upload_file ------------------------------------------------------- #
+
+	async def _find_file_input(self, session: BrowserSession, index: Any) -> tuple[Any, int]:
+		"""Найти ``<input type=file>`` для загрузки. Возвращает (узел, живой индекс).
+
+		``index`` задан — берём его (или ближайший к нему file input); иначе ищем
+		по всей карте. Скрытость роли не играет: ``setFileInputFiles`` работает и
+		по невидимому input, а сайты (ChatGPT) держат его именно спрятанным.
+		Предпочитаем input без ограничения ``accept`` (принимает любой файл).
+		"""
+		if index is not None:
+			node, _live, _info = await self._resolve(session, int(index), what='attached to')
+			target = node if session.is_file_input(node) else session.find_file_input_near_element(node)
+			if target is None:
+				raise ToolError(
+					f'Element [{index}] is not a file input and no file input sits near it. Point index at the '
+					f'attach control, or omit index to search the whole page.'
+				)
+			return target, session.get_selector_index(target)
+
+		selector_map = await session.get_selector_map()
+		inputs = [n for n in selector_map.values() if session.is_file_input(n)]
+		if not inputs:
+			raise ToolError(
+				'No file input is present on the page. Many sites (ChatGPT included) mount it only after you '
+				'focus or click the composer / attach control — do that first, then call upload_file. '
+				'If an attach button opens a menu, click it, then upload_file.'
+			)
+		# Предпочтение: без accept (любой тип) -> с accept -> первый попавшийся.
+		inputs.sort(key=lambda n: 0 if not ((n.attributes or {}).get('accept') or '').strip() else 1)
+		chosen = inputs[0]
+		return chosen, session.get_selector_index(chosen)
+
+	async def _file_input_count(self, session: BrowserSession, node: Any) -> int | None:
+		"""Сколько файлов реально висит на input. ``None`` — пробу снять не удалось (fail-open)."""
+		try:
+			cdp = await session.cdp_client_for_node(node)
+			resolved = await cdp.cdp_client.send.DOM.resolveNode(
+				params={'backendNodeId': node.backend_node_id}, session_id=cdp.session_id
+			)
+			object_id = resolved.get('object', {}).get('objectId')
+			if not object_id:
+				return None
+			out = await cdp.cdp_client.send.Runtime.callFunctionOn(
+				params={
+					'functionDeclaration': 'function(){ return this.files ? this.files.length : -1; }',
+					'objectId': object_id,
+					'returnByValue': True,
+				},
+				session_id=cdp.session_id,
+			)
+			value = out.get('result', {}).get('value')
+			return int(value) if isinstance(value, (int, float)) and value >= 0 else None
+		except Exception:
+			return None
+
+	async def _tool_upload_file(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
+		"""Приложить файл из папки вложений к ``<input type=file>`` страницы.
+
+		Без ``file`` — список того, что в папке (агенту надо знать, чем можно
+		грузить). С ``file`` — резолвим имя ВНУТРИ папки (граница безопасности),
+		находим file input, ставим файл через реестровое ``upload_file`` с
+		точечным allowlist из одного этого пути и сверяем фактом (``files.length``).
+		"""
+		uploads = _bu_mcp('uploads')
+		raw = args.get('file') if args.get('file') is not None else args.get('path')
+
+		if not raw:
+			names = uploads.list_names()
+			return self._text(
+				{
+					'action': (
+						f'{len(names)} file(s) in the upload folder. Attach one with upload_file(file="<name>").'
+						if names
+						else 'The upload folder is empty. Put a file there, then upload_file(file="<name>").'
+					),
+					'dir': str(uploads.upload_dir()),
+					'files': names,
+				},
+				compact=True,
+			)
+
+		try:
+			abs_path = uploads.resolve(str(raw))
+		except uploads.NotAllowedError as exc:
+			raise ToolError(str(exc)) from exc
+		rel = uploads.relative_name(abs_path)
+
+		waiting_mod = _bu_mcp('waiting')
+		session, tools = await self._ensure_session()
+		await self._check_domain_gate('upload_file')
+
+		file_node, live_index = await self._find_file_input(session, args.get('index'))
+		await self._journal_capture(session, live_index)
+		before = await self._delta_start(session)
+		# В журнал/макрос кладём ИМЯ в папке, не абсолютный путь: сценарий должен
+		# переноситься на машину, где папка лежит по другому пути.
+		self._journal_note(url_before=before.get('url'), resolved_index=live_index, params={'file': rel})
+
+		try:
+			result = await tools.registry.execute_action(
+				'upload_file',
+				{'index': live_index, 'path': abs_path},
+				browser_session=session,
+				file_system=self._file_system,
+				# Точечный allowlist: ровно этот путь. Мы его уже проверили внутри
+				# папки — второй раз считать весь каталог незачем.
+				available_file_paths=[abs_path],
+			)
+		except Exception as exc:
+			raise ToolError(f'upload_file({rel!r}) failed: {type(exc).__name__}: {exc}') from exc
+
+		action_text = self._action_result_text('upload_file', result)
+		attached = await self._file_input_count(session, file_node)
+		waiting = await waiting_mod.wait_for_page_ready(session, timeout=float(args.get('timeout') or 8.0))
+		delta = await self._delta_end(session, before)
+		url = await self._current_url()
+		self._journal_note(url_after=url, delta=delta)
+
+		if attached == 0:
+			# Реестр отчитался об успехе, но на input ноль файлов — тот самый
+			# тихий нооп, против которого написан весь слой. Это ошибка, не отчёт.
+			raise ToolError(
+				f'upload_file({rel!r}) reported success but the file input holds 0 files. The input may be the '
+				f'wrong one, or the site rejected the type. Check browser_state and the attach control.'
+			)
+		return self._text(
+			{
+				'action': f'Attached {rel!r} to the page.',
+				'file': rel,
+				'files_on_input': attached,
+				'url': url,
+				'delta': delta,
+				'upstream': action_text,
+			},
+			compact=True,
+		)
+
 	async def _tool_macro_list(self, args: dict[str, Any]) -> Sequence[types.ContentBlock]:
 		"""Без имени — что сохранено; с именем — макрос целиком."""
 		directory = self._macro_dir()
@@ -3208,6 +3379,8 @@ class BuMcpServer:
 				# Единственное наблюдение, которое журналируется: оно становится
 				# шагом-проверкой макроса.
 				'checkpoint': self._tool_checkpoint,
+				# Загрузка файла из папки вложений: свой обработчик вместо моста.
+				'upload_file': self._tool_upload_file,
 			}
 			if name in overrides:
 				run = overrides[name]

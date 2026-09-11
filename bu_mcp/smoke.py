@@ -466,6 +466,95 @@ def contract_checks() -> None:
 	headless_contract_checks(BuMcpServer)
 	journal_contract_checks(BuMcpServer, ToolError)
 	replay_tolerance_checks()
+	upload_contract_checks()
+
+
+def upload_contract_checks() -> None:
+	"""Чистые проверки папки вложений: граница и параметризация файла в макросе.
+
+	Живой браузер не нужен: суть — «какой файл можно приложить» и «как имя файла
+	становится переменной сценария», и то и другое проверяется без страницы.
+	"""
+	print('\n[10f] contract: upload folder boundary and macro file variable (pure)')
+	import os
+	import tempfile
+
+	from bu_mcp import journal as journal_mod
+	from bu_mcp import uploads
+
+	saved = os.environ.get('BU_MCP_UPLOAD_DIR')
+	updir = tempfile.mkdtemp(prefix='bu-upload-smoke-')
+	os.environ['BU_MCP_UPLOAD_DIR'] = updir
+	try:
+		Path(updir, 'doc.pdf').write_text('pdf')
+		(Path(updir) / 'sub').mkdir()
+		Path(updir, 'sub', 'pic.png').write_text('png')
+		Path(updir, 'empty.bin').write_text('')
+
+		names = set(uploads.list_names())
+		if {'doc.pdf', os.path.join('sub', 'pic.png')} <= names and 'empty.bin' in names:
+			ok('upload folder lists files recursively')
+		else:
+			bad('upload folder lists files recursively', str(sorted(names)))
+
+		# Резолв внутри папки — ок; выход за папку / пустой / отсутствующий — отказ.
+		resolved_ok = False
+		try:
+			p = uploads.resolve('sub/pic.png')
+			resolved_ok = os.path.realpath(p).startswith(os.path.realpath(updir) + os.sep)
+		except Exception:
+			resolved_ok = False
+		blocked = []
+		for bad_name in ('../../../etc/passwd', 'empty.bin', 'nope.txt'):
+			try:
+				uploads.resolve(bad_name)
+				blocked.append(f'{bad_name}: NOT blocked')
+			except uploads.NotAllowedError:
+				pass
+		if resolved_ok and not blocked:
+			ok('upload resolve: inside allowed, escape/empty/missing refused')
+		else:
+			bad('upload resolve: inside allowed, escape/empty/missing refused', f'resolved={resolved_ok} {blocked}')
+
+		# to_macro превращает имя файла в переменную attachment, индекс вычищается.
+		journal_mod.reset(session_id='upload-contract')
+		hint = {
+			'index': 5,
+			'tag': 'input',
+			'attributes': {'type': 'file', 'id': 'f'},
+			'xpath': 'html/body/form/input',
+			'backend_node_id': 5,
+			'accessible_name': None,
+		}
+		journal_mod.record(
+			{
+				'tool': 'upload_file',
+				'params': {'file': 'doc.pdf', 'index': 5},
+				'handle': hint,
+				'url_before': 'https://x.test/',
+				'url_after': 'https://x.test/',
+				'delta': {'changed': True, 'status': 'changed'},
+				'outcome': 'ok',
+			}
+		)
+		macro = journal_mod.to_macro(journal_mod.read(), name='upl-contract')
+		step = (macro.get('steps') or [{}])[0]
+		var_ok = step.get('params', {}).get('file') == {'$var': 'attachment'}
+		default_ok = (macro.get('vars') or {}).get('attachment', {}).get('value') == 'doc.pdf'
+		no_index = 'index' not in step.get('params', {})
+		has_hint = 'hint' in step
+		if var_ok and default_ok and no_index and has_hint:
+			ok('to_macro: upload file name becomes the `attachment` variable, index stripped, handle kept')
+		else:
+			bad(
+				'to_macro: upload file name becomes the `attachment` variable, index stripped, handle kept',
+				f'var={var_ok} default={default_ok} no_index={no_index} hint={has_hint}',
+			)
+	finally:
+		if saved is None:
+			os.environ.pop('BU_MCP_UPLOAD_DIR', None)
+		else:
+			os.environ['BU_MCP_UPLOAD_DIR'] = saved
 
 
 def replay_tolerance_checks() -> None:
@@ -700,6 +789,7 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		'select_dropdown',
 		'send_keys',
 		'scroll',
+		'upload_file',
 		# Единственное наблюдение в журнале: при повторе оно — шаг-проверка.
 		'checkpoint',
 	}

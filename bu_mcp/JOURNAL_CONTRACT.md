@@ -54,6 +54,12 @@ accessible name, и `describe_handle` возвращает составной х
 единственное наблюдение, которое журналируется: при повторе это шаг-проверка,
 и `timeout` у него остаётся в макросе как часть смысла шага.
 
+Загрузка файла (`tool: 'upload_file'`) журналируется как элементное действие с
+хендлом `<input type=file>`; `params.file` — имя внутри папки вложений
+(`bu_mcp.uploads`), которое `to_macro` выносит в переменную `attachment`, а
+`macro.run` резолвит обратно в абсолютный путь внутри папки (allowlist из
+одного пути).
+
 MCP: `macro_record(action=start|stop|status, name, save, replace_from)`,
 `checkpoint(text, not_text, url, timeout, note)`, `macro_save(..., replace_from)`,
 `macro_run(..., from_step, new_tab)`. CLI без сервера и модели:

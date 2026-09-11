@@ -929,8 +929,23 @@ async def _act(session: Any, tool: str, params: dict[str, Any], node: Any, live_
 	elif name == 'scroll':
 		payload.pop('index', None)
 
+	extra: dict[str, Any] = {}
+	if name in ('upload_file', 'upload'):
+		# Имя файла (переменная сценария) -> абсолютный путь ВНУТРИ папки
+		# вложений, с тем же allowlist, что и у сервера. Резолв — единственное
+		# место, где имя проверяется на выход за папку; на другой машине путь
+		# другой, а имя то же.
+		uploads = importlib.import_module('bu_mcp.uploads')
+		fname = payload.pop('file', None) or payload.get('path')
+		try:
+			abs_path = uploads.resolve(str(fname))
+		except uploads.NotAllowedError as exc:
+			raise StepFailed(f'upload_file: {exc}') from exc
+		payload['path'] = abs_path
+		extra['available_file_paths'] = [abs_path]
+
 	try:
-		result = await tools.registry.execute_action(name, payload, browser_session=session, file_system=fs)
+		result = await tools.registry.execute_action(name, payload, browser_session=session, file_system=fs, **extra)
 	except StepFailed:
 		raise
 	except Exception as exc:
