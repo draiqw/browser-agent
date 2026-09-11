@@ -277,6 +277,31 @@ async def preserve_frontmost():
 			)
 			_WE_TOOK_FRONT = verdict.strip() == 'took'
 
+			# Догоняющая проверка. Одной сверки мало: окно Chrome поднимается не в
+			# момент CDP-вызова, а спустя мгновение после него, и мы успеваем
+			# «вернуть» фокус ДО того, как его заберут. Замерено на живом прогоне:
+			# окно выходило вперёд через ~10 с после старта и держало фокус 8 с.
+			# Поэтому ещё несколько раз в фоне смотрим, не вылез ли он, и
+			# возвращаем фокус владельцу. Фоном — чтобы не платить задержкой в
+			# каждом действии.
+			async def _catch_up(target: str) -> None:
+				for delay in (0.4, 0.7, 1.2):
+					await asyncio.sleep(delay)
+					again = await osa(
+						'tell application "System Events"\n'
+						f'  if unix id of (first process whose frontmost is true) is {ours} then\n'
+						f'    set frontmost of (first process whose unix id is {target}) to true\n'
+						'    return "took"\n'
+						'  end if\n'
+						'  return "idle"\n'
+						'end tell'
+					)
+					if again.strip() != 'took':
+						return
+
+			with contextlib.suppress(Exception):
+				asyncio.get_running_loop().create_task(_catch_up(was))
+
 
 class Target(BaseModel):
 	"""Browser target (page, iframe, worker) - the actual entity being controlled.
