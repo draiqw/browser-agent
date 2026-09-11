@@ -1472,10 +1472,16 @@ async def hover_and_delta_checks(session) -> None:
 			cl = await session.call_tool('close', {'tab_id': str(tab['tab_id'])})
 			closed += 0 if cl.isError else 1
 		print(f'  cleanup: closed {closed}/{len(mine)} of our tabs')
-		if mine and closed == len(mine):
-			ok('hover run cleaned up its tabs', f'{closed}')
+		# Проверяем то, что важно: после нас не осталось лишних вкладок. Считать
+		# провалом «мы не открыли ни одной» нельзя — когда предыдущая секция
+		# закрыла всё, browser-use отдаёт под new_tab уже готовую пустую вкладку,
+		# и открывать вторую незачем.
+		left = {t['tab_id'] for t in state_of(await session.call_tool('browser_state', {})).get('tabs', [])}
+		leaked = left - before_ids - {t['tab_id'] for t in tabs if t['tab_id'] not in ours}
+		if closed == len(mine) and not leaked:
+			ok('hover run cleaned up its tabs', f'{closed}/{len(mine)}')
 		else:
-			bad('hover run cleaned up its tabs', f'{closed}/{len(mine)}')
+			bad('hover run cleaned up its tabs', f'closed {closed}/{len(mine)}, leaked {sorted(leaked)}')
 
 
 # --------------------------------------------------------------------------- #

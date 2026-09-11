@@ -50,6 +50,11 @@ class SessionManager:
 		# leave every tab but the most recently attached one without lifecycle events.
 		self._lifecycle_events: dict[TargetID, deque[dict[str, Any]]] = {}
 
+		# Сессии, которым мы включили эмуляцию фокуса: на отключении снимаем её обратно.
+		# Браузер может быть чужой и пережить нас, а вкладка с вечно «сфокусированной»
+		# страницей — это не только наш ввод, но и невыключенные таймеры у пользователя.
+		self._focus_emulated_sessions: set[tuple[TargetID, SessionID]] = set()
+
 		self._lock = asyncio.Lock()
 		self._recovery_lock = asyncio.Lock()
 
@@ -203,8 +208,28 @@ class SessionManager:
 			return False
 		return len(self._target_sessions[target_id]) > 0
 
+	async def _release_focus_emulation(self) -> None:
+		"""Снять эмуляцию фокуса с тех вкладок, которым мы её ставили.
+
+		Best-effort: CDP на этот момент может быть уже мёртв, и это нормально —
+		вместе с соединением эмуляция и так перестаёт действовать. Смысл в другом
+		случае: браузер живой и остаётся пользователю.
+		"""
+		pending, self._focus_emulated_sessions = self._focus_emulated_sessions, set()
+		if not pending:
+			return
+		client = self.browser_session._cdp_client_root
+		if client is None:
+			return
+		for _target_id, session_id in pending:
+			try:
+				await client.send.Emulation.setFocusEmulationEnabled(params={'enabled': False}, session_id=session_id)
+			except Exception as e:
+				self.logger.debug(f'[SessionManager] Could not disable focus emulation for {session_id}: {e}')
+
 	async def clear(self) -> None:
 		"""Clear all owned data structures for cleanup."""
+		await self._release_focus_emulation()
 		async with self._lock:
 			# Clear owned data (single source of truth)
 			self._targets.clear()
@@ -906,10 +931,16 @@ class SessionManager:
 			# 'visible'), и ввод идёт как в активную. Ровно это делает Playwright на
 			# каждой странице. Альтернатива — Target.activateTarget — выносит окно
 			# вперёд и крадёт фокус у пользователя.
+			# Отдельный try: сбой этой эмуляции не должен утащить с собой простановку
+			# _lifecycle_events ниже — без неё вкладка навсегда останется без мониторинга.
 			if _focus_emulation_wanted():
-				await cdp_session.cdp_client.send.Emulation.setFocusEmulationEnabled(
-					params={'enabled': True}, session_id=cdp_session.session_id
-				)
+				try:
+					await cdp_session.cdp_client.send.Emulation.setFocusEmulationEnabled(
+						params={'enabled': True}, session_id=cdp_session.session_id
+					)
+					self._focus_emulated_sessions.add((cdp_session.target_id, cdp_session.session_id))
+				except Exception as focus_exc:
+					self.logger.debug(f'Focus emulation not enabled for {cdp_session.target_id}: {focus_exc}')
 
 			# Event storage and the Page.lifecycleEvent handler live in SessionManager
 			# (one global handler registered in start_monitoring, routed by session_id):

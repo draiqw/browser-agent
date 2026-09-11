@@ -132,7 +132,8 @@ CLI и штатном MCP-сервере.
 
 Каждое действие, МЕНЯЮЩЕЕ состояние, пишется в журнал: `browser_click`,
 `browser_type`, `browser_hover`, `browser_navigate`, `select_dropdown`,
-`send_keys`, `scroll` (константа `JOURNALED_TOOLS`). Наблюдения не пишутся —
+`send_keys`, `scroll`, `upload_file` — и вдобавок `checkpoint` (константа
+`JOURNALED_TOOLS`, 9 имён). Наблюдения не пишутся —
 их всё равно выкидывает `to_macro`. Единственное исключение — `checkpoint`:
 это заявленное агентом условие («ответ на странице»), при повторе — шаг-проверка.
 

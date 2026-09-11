@@ -114,6 +114,7 @@ os.environ.setdefault('ANONYMIZED_TELEMETRY', 'false')
 
 import asyncio
 import base64
+import contextlib
 import importlib
 import io
 import json
@@ -1272,6 +1273,19 @@ class BuMcpServer:
 
 	# -- исполнение --------------------------------------------------------- #
 
+	@staticmethod
+	def _wants_file_paths(tools: Any, name: str) -> bool:
+		"""Нужен ли действию allowlist файлов. Обход папки — не бесплатный, зря не ходим."""
+		try:
+			import inspect
+
+			action = tools.registry.registry.actions.get(name)
+			if action is None:
+				return False
+			return 'available_file_paths' in inspect.signature(action.function).parameters
+		except Exception:
+			return True  # не разобрались — лучше дать allowlist, чем уронить действие
+
 	async def _run_registry_action(self, name: str, args: dict[str, Any]) -> str:
 		session, tools = await self._ensure_session()
 		await self._check_domain_gate(name)
@@ -1281,7 +1295,7 @@ class BuMcpServer:
 				args,
 				browser_session=session,
 				file_system=self._file_system,
-				available_file_paths=_bu_mcp('uploads').allowed_files(),
+				available_file_paths=(_bu_mcp('uploads').allowed_files() if self._wants_file_paths(tools, name) else None),
 			)
 		except ToolError:
 			raise
@@ -2987,6 +3001,13 @@ class BuMcpServer:
 			if not current and not args.get('name'):
 				raise ToolError('No recording is open and no name was given. Call macro_record action="start" first.')
 			marker = journal_mod.mark('stop', name)
+			if marker.get('mismatch'):
+				# Остановили не ту запись: открытая осталась открытой, и говорить
+				# «записано» про чужое имя — врать агенту.
+				raise ToolError(
+					f'The open recording is {marker["mismatch"]!r}, not {name!r}; it is still open. '
+					f'Stop it by its own name, or pass that name explicitly.'
+				)
 			entries = journal_mod.read()
 			found = journal_mod.span(entries, name=name)
 			if not found:
@@ -3099,14 +3120,20 @@ class BuMcpServer:
 			object_id = resolved.get('object', {}).get('objectId')
 			if not object_id:
 				return None
-			out = await cdp.cdp_client.send.Runtime.callFunctionOn(
-				params={
-					'functionDeclaration': 'function(){ return this.files ? this.files.length : -1; }',
-					'objectId': object_id,
-					'returnByValue': True,
-				},
-				session_id=cdp.session_id,
-			)
+			try:
+				out = await cdp.cdp_client.send.Runtime.callFunctionOn(
+					params={
+						'functionDeclaration': 'function(){ return this.files ? this.files.length : -1; }',
+						'objectId': object_id,
+						'returnByValue': True,
+					},
+					session_id=cdp.session_id,
+				)
+			finally:
+				# Хендл удалённого объекта живёт до смены контекста — отпускаем сами,
+				# как это делает resolve.py.
+				with contextlib.suppress(Exception):
+					await cdp.cdp_client.send.Runtime.releaseObject(params={'objectId': object_id}, session_id=cdp.session_id)
 			value = out.get('result', {}).get('value')
 			return int(value) if isinstance(value, (int, float)) and value >= 0 else None
 		except Exception:
@@ -3184,9 +3211,16 @@ class BuMcpServer:
 			)
 		return self._text(
 			{
-				'action': f'Attached {rel!r} to the page.',
+				# Проба не всегда снимается (CDP мог не ответить). Тогда говорим об этом
+				# прямо в тексте, а не выдаём непроверенное за проверенное.
+				'action': (
+					f'Attached {rel!r} to the page.'
+					if attached
+					else f'Attached {rel!r}, but could NOT verify it landed on the input. Check browser_state.'
+				),
 				'file': rel,
 				'files_on_input': attached,
+				'verified': attached is not None,
 				'url': url,
 				'delta': delta,
 				'upstream': action_text,

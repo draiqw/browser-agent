@@ -434,8 +434,14 @@ def _opaque_segment(seg: str) -> bool:
 		return True
 	# Длинный смешанный токен с цифрой: base64/nanoid-подобные id, возможно с
 	# префиксом источника через двоеточие (``WEB:...``, ``ORG:...``).
+	# Одной длины и наличия цифры мало: под это подходит и обычный человекочитаемый
+	# слаг (``iphone-15-pro-max``, ``top-10-javascript-tips``), а принять чужой товар
+	# за свой — ровно та ошибка, ради которой весь слой написан. Поэтому дополнительно
+	# требуем признак машинного id: смешанный регистр или заметная доля цифр.
 	if len(seg) >= 16 and re.fullmatch(r'[A-Za-z0-9:_-]+', seg) and any(c.isdigit() for c in seg):
-		return True
+		mixed_case = any(c.islower() for c in seg) and any(c.isupper() for c in seg)
+		digit_ratio = sum(c.isdigit() for c in seg) / len(seg)
+		return mixed_case or digit_ratio >= 0.3
 	return False
 
 
@@ -1138,7 +1144,15 @@ async def run(
 	if auto_start and str(first.get('tool') or '') not in ('browser_navigate', 'navigate'):
 		want = first.get('url_before')
 		have = current_probe.get('url')
-		if isinstance(want, str) and want and isinstance(have, str) and _same_page(want, have) == 'different':
+		start_verdict = _same_page(want, have) if isinstance(want, str) and want and isinstance(have, str) else None
+		if start_verdict == 'template':
+			# Тот же шаблон пути, но другой id ресурса: может быть тот же самый
+			# динамический адрес (новый чат), а может — чужой ресурс. Угадывать не
+			# наше дело, но и молчать нельзя: пишем в отчёт, а не проглатываем.
+			why = f'auto_start: the browser is on {have!r}, while step {first.get("n")} was recorded on {want!r} (same path template, different id)'
+			report['discrepancies'].append({'step': 0, 'kind': 'url_template', 'severity': 'note', 'why': why})
+			report['warnings'].append(why)
+		if start_verdict == 'different':
 			try:
 				baseline = await waiting_mod.navigation_baseline(session)
 				await _act(session, 'browser_navigate', {'url': want}, None, None)
@@ -1351,6 +1365,9 @@ async def _cli_run(args: Any) -> int:
 	except FileNotFoundError:
 		print(f'no macro named {args.name!r} in {journal_mod.home() / "macros"}; see `list`', file=sys.stderr)
 		return 2
+	except Exception as exc:
+		print(f'macro {args.name!r} is unreadable: {type(exc).__name__}: {exc}', file=sys.stderr)
+		return 2
 	try:
 		values = dict(_parse_var(v) for v in (args.var or []))
 	except ValueError as exc:
@@ -1483,6 +1500,9 @@ def _cli(argv: list[str]) -> int:
 			print(json.dumps(journal_mod.load_macro(args.name), ensure_ascii=False, indent=2))
 		except FileNotFoundError:
 			print(f'no macro named {args.name!r}', file=sys.stderr)
+			return 2
+		except Exception as exc:
+			print(f'macro {args.name!r} is unreadable: {type(exc).__name__}: {exc}', file=sys.stderr)
 			return 2
 		return 0
 	if args.cmd == 'run':

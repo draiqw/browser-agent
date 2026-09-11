@@ -252,6 +252,11 @@ def mark(event: str, name: str, **extra: Any) -> dict[str, Any]:
 	entry['seq'] = seq
 	if event == 'start':
 		_RECORDING = {'name': _safe_name(name), 'since': len(read()), 'seq': seq}
+	elif _RECORDING is not None and _RECORDING.get('name') not in (None, _safe_name(name)):
+		# Остановили не ту запись: в файл ушёл стоп-маркер для чужого имени, а
+		# открытая запись так и не закрыта. Забыть про неё здесь — значит потом
+		# соврать в status, что записи нет.
+		entry['mismatch'] = _RECORDING.get('name')
 	else:
 		_RECORDING = None
 	return entry
@@ -848,17 +853,21 @@ def to_macro(entries: list[dict[str, Any]], *, name: str) -> dict[str, Any]:
 		if tool not in ('browser_type', 'input') or not collapsed:
 			collapsed.append(entry)
 			continue
-		prev = collapsed[-1]
-		same_tool = str(prev.get('tool')) in ('browser_type', 'input')
-		same_field = _handle_key(prev.get('handle')) is not None and _handle_key(prev.get('handle')) == _handle_key(
-			entry.get('handle')
-		)
 		clears = bool((entry.get('params') or {}).get('clear', True))
-		if same_tool and same_field and clears:
-			drop(prev, 'superseded')
-			collapsed[-1] = entry
-		else:
+		key = _handle_key(entry.get('handle'))
+		if not clears or key is None:
 			collapsed.append(entry)
+			continue
+		# Ввод с clear=True стирает поле целиком, значит обесценивает ВСЮ предыдущую
+		# цепочку вводов в это же поле, а не только последний из них: дозапись
+		# (clear=False) в середине не должна спасать первый ввод от выкидывания.
+		while collapsed:
+			prev = collapsed[-1]
+			if str(prev.get('tool')) not in ('browser_type', 'input') or _handle_key(prev.get('handle')) != key:
+				break
+			drop(prev, 'superseded')
+			collapsed.pop()
+		collapsed.append(entry)
 
 	# --- проход 5: сборка шагов ---------------------------------------------- #
 	steps: list[dict[str, Any]] = []

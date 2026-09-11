@@ -13,7 +13,7 @@ accessible name, и `describe_handle` возвращает составной х
 
 ## bu_mcp/journal.py
 
-    def record(entry: dict) -> None
+    def record(entry: dict) -> int | None   # seq записи, None если не записалось
     def current_path() -> Path
     def read(path: Path | None = None, *, limit: int | None = None) -> list[dict]
     def to_macro(entries: list[dict], *, name: str) -> dict
@@ -44,7 +44,7 @@ accessible name, и `describe_handle` возвращает составной х
 
     journal.mark(event: 'start'|'stop', name) -> dict      # закладка в журнале
     journal.recording() -> dict | None                      # открытая запись
-    journal.span(entries, name=None) -> (positions, info)   # отрезок между закладками
+    journal.span(entries, name=None) -> (positions, info) | None  # отрезок между закладками
     journal.merge_macro(base, patch, *, at) -> dict         # починка: шаги 1..at-1 из base
     macro.checkpoint(session, params, *, timeout=None) -> dict   # ждёт условие, StepFailed
     macro.run(..., from_step=1, auto_start=True)
