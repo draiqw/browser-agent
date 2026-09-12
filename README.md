@@ -26,12 +26,13 @@
 
 Подробности, замеры и известные ограничения — [`BU_MCP.md`](BU_MCP.md).
 Методика и полные результаты бенчмарка — [`bu_mcp/BENCH.md`](bu_mcp/BENCH.md),
-сырые данные в `bu_mcp/bench_results.json`.
+сырые данные в `bu_mcp/bench_results.json`. Что менялось и почему, с проверками
+и тупиками — [`bu_mcp/WORKLOG.md`](bu_mcp/WORKLOG.md).
 
 ```bash
-scripts/chrome-automation.sh          # Chrome с CDP на 9222, headless
+scripts/chrome-automation.sh          # Chrome с CDP на 9222, окно скрыто
 PYTHONPATH=. python -m bu_mcp.server  # MCP-сервер, транспорт stdio
-PYTHONPATH=. python bu_mcp/smoke.py   # 139 проверок на живом браузере
+PYTHONPATH=. python bu_mcp/smoke.py   # 165 проверок на живом браузере
 ```
 
 **Что НЕ проверено:** что агент с этим слоем решает реальные задачи лучше или
