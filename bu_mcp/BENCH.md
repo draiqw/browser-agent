@@ -2,9 +2,9 @@
 
 Run: 2026-09-03 12:55:12 -> 2026-09-03 13:01:06 (main pass)  
 Chrome: `Chrome/152.0.7977.65` headless, CDP `http://127.0.0.1:9222`  
-Python: `/Users/draiqws/browser-use/.venv/bin/python`  
+Python: `/Users/draiqws/browser-agent/.venv/bin/python`  
 Repeats per site per server: 3 (median reported)  
-Regenerate: `/Users/draiqws/browser-use/.venv/bin/python -m bu_mcp.bench`
+Regenerate: `/Users/draiqws/browser-agent/.venv/bin/python -m bu_mcp.bench`
 
 This is a **re-run of the whole corpus after the three defects the first run exposed were
 fixed** (commit `87207752c`: the navigate/baseline race, the JSON-escape tax on the tree,
@@ -25,7 +25,7 @@ the same already-running headless Chrome:
 | | command | state tool | navigate | click |
 |---|---|---|---|---|
 | **stock** | `python -m browser_use.mcp` | `browser_get_state` | `browser_navigate` | `browser_click` |
-| **ours** | `PYTHONPATH=/Users/draiqws/browser-use BU_MCP_CDP_URL=http://127.0.0.1:9222 python -m bu_mcp.server` | `browser_state` | `browser_navigate` | `browser_click` |
+| **ours** | `PYTHONPATH=/Users/draiqws/browser-agent BU_MCP_CDP_URL=http://127.0.0.1:9222 python -m bu_mcp.server` | `browser_state` | `browser_navigate` | `browser_click` |
 
 Per site, per server, per repeat: `navigate(url)` then the state tool. Nothing else is
 called, and no site element is ever clicked.

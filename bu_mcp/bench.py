@@ -33,7 +33,7 @@ Safety rules baked in:
 
 Usage::
 
-    /Users/draiqws/browser-use/.venv/bin/python -m bu_mcp.bench            # full run
+    /Users/draiqws/browser-agent/.venv/bin/python -m bu_mcp.bench            # full run
     ... -m bu_mcp.bench --repeats 1 --sites wikipedia,github               # quick
     ... -m bu_mcp.bench --report-only                                      # re-render md
 """
