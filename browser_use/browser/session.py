@@ -5,6 +5,7 @@ import contextlib
 import logging
 import os
 import re
+import signal
 import sys
 import time
 from functools import cached_property
@@ -196,6 +197,16 @@ async def start_focus_guard() -> None:
 	global _FOCUS_GUARD
 	if sys.platform != 'darwin' or _activation_allowed():
 		return
+	# По умолчанию ВЫКЛЮЧЕН, и это не осторожность, а замер. Сторож честно убирает
+	# кражи фокуса (за весь smoke — ноль против 7 и 2 секунд без него), но ценой
+	# сломанных скриншотов: Chrome рисует кадры только для окна, которое видно, а
+	# сторож не даёт окну быть впереди, и `Page.captureScreenshot` висит до
+	# таймаута в 60 с. Пауза сторожа на время снимка (`paused_focus_guard`) делу
+	# не помогла — проверено. Значит по умолчанию работает только обёртка
+	# `preserve_frontmost`: она слабее, но ничего не ломает.
+	# `BU_FOCUS_GUARD=1` включает сторожа для сценариев без скриншотов.
+	if os.getenv('BU_FOCUS_GUARD', '0').strip().lower() not in ('1', 'true', 'yes', 'on'):
+		return
 	if _FOCUS_GUARD is not None and _FOCUS_GUARD.returncode is None:
 		return
 	ours = await _automation_chrome_pid()
@@ -224,6 +235,29 @@ async def start_focus_guard() -> None:
 		_FOCUS_GUARD = await asyncio.create_subprocess_exec(
 			'osascript', '-e', script, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL
 		)
+
+
+@contextlib.asynccontextmanager
+async def paused_focus_guard():
+	"""Приостановить сторожа на время операции, которой нужен живой кадр.
+
+	Сторож не даёт окну Chrome быть впереди — а Chrome рисует кадры только для
+	окна, которое видно. Замерено: со сторожем `Page.captureScreenshot` висит до
+	таймаута в 60 с, без него снимок приходит за доли секунды. Поэтому на время
+	снимка сторож замирает (SIGSTOP), а потом продолжает с того же места: убивать
+	и поднимать заново дороже и оставило бы окно без присмотра.
+	"""
+	proc = _FOCUS_GUARD
+	alive = proc is not None and proc.returncode is None
+	if alive:
+		with contextlib.suppress(Exception):
+			proc.send_signal(signal.SIGSTOP)
+	try:
+		yield
+	finally:
+		if alive:
+			with contextlib.suppress(Exception):
+				proc.send_signal(signal.SIGCONT)
 
 
 async def stop_focus_guard() -> None:

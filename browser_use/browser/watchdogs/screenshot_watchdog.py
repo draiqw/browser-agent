@@ -75,7 +75,12 @@ class ScreenshotWatchdog(BaseWatchdog):
 
 			# Take screenshot using CDP
 			self.logger.debug(f'[ScreenshotWatchdog] Taking screenshot with params: {params}')
-			result = await cdp_session.cdp_client.send.Page.captureScreenshot(params=params, session_id=cdp_session.session_id)
+			from browser_use.browser.session import paused_focus_guard
+
+			async with paused_focus_guard():
+				result = await cdp_session.cdp_client.send.Page.captureScreenshot(
+					params=params, session_id=cdp_session.session_id
+				)
 
 			# Return base64-encoded screenshot data
 			if result and 'data' in result:
