@@ -4,7 +4,7 @@
 Требует Chrome с открытым CDP на BU_MCP_CDP_URL (по умолчанию 127.0.0.1:9222).
 
 Запуск:
-    ~/browser-use/.venv/bin/python ~/bu-mcp/smoke.py
+    PYTHONPATH=. python browser_use/mcp/smoke.py
 
 Работает строго в своей вкладке (navigate new_tab=True) и закрывает её за собой.
 """
@@ -24,7 +24,7 @@ from typing import Any, cast
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
-ROOT = Path(__file__).resolve().parent
+ROOT = Path(__file__).resolve().parents[2]  # browser_use/mcp/ -> browser_use/ -> repo root
 
 #: Индекс в дереве состояния: `[12]<input ...>`, возможно под префиксом |SHADOW(open)|.
 INDEX_RE = re.compile(r'\[(\d+)\]<')

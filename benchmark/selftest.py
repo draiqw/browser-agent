@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import re
 
-from bu_eval.upstream import Check
+from benchmark.upstream import Check
 
 
 def t_never_steals_focus() -> Check:
@@ -24,7 +24,7 @@ def t_never_steals_focus() -> Check:
 	настоящий Chrome с настоящим профилем проходит. Поэтому инвариант теперь
 	формулируется по существу, а не через отсутствие окна:
 
-	* `bu_eval` умеет только ПОДКЛЮЧАТЬСЯ к уже работающему Chrome — ветки
+	* `benchmark` умеет только ПОДКЛЮЧАТЬСЯ к уже работающему Chrome — ветки
 	  запуска своего браузера здесь нет и не должно появиться;
 	* окно, если оно есть, стартует без активации и сразу прячется, а фокус
 	  после запуска возвращается тому, кто был впереди;
@@ -36,7 +36,7 @@ def t_never_steals_focus() -> Check:
 	"""
 	from pathlib import Path
 
-	from bu_eval.backends import attached_profile
+	from benchmark.backends import attached_profile
 
 	p = attached_profile()
 	bad = []
@@ -142,7 +142,7 @@ def t_model_factory() -> Check:
 	"""
 	import os
 
-	from bu_eval.models import make_model
+	from benchmark.models import make_model
 
 	placeholder = os.getenv('OPENAI_API_KEY') is None
 	if placeholder:
@@ -166,7 +166,7 @@ def t_model_factory() -> Check:
 
 def t_profiles() -> Check:
 	"""Профили собирают разные наборы действий, координаты включаются только там, где заявлено."""
-	from bu_eval.profiles import PROFILES
+	from benchmark.profiles import PROFILES
 
 	rows, bad = [], []
 	for name, p in PROFILES.items():
@@ -185,7 +185,7 @@ def t_profiles() -> Check:
 
 def t_mcp_profiles() -> Check:
 	"""Наборы MCP-инструментов не пусты, вложены как заявлено и не разъезжаются с сервером."""
-	from bu_eval.profiles import MCP_ACT, MCP_ALL, MCP_READ, PROFILES
+	from benchmark.profiles import MCP_ACT, MCP_ALL, MCP_READ, PROFILES
 
 	bad = []
 	if not set(MCP_READ) < set(MCP_ACT):
@@ -212,8 +212,8 @@ def t_mcp_tools() -> Check:
 	"""
 	import asyncio
 
+	from benchmark.profiles import PROFILES
 	from browser_use.mcp.bench import OURS, McpClient
-	from bu_eval.profiles import PROFILES
 
 	async def ask() -> list[str]:
 		client = McpClient(OURS)
@@ -246,8 +246,8 @@ def t_done_schema() -> Check:
 	"""Синтетический `done` собирает параметры из схемы задачи и не теряет вложенные модели."""
 	import json
 
-	from bu_eval.loop import done_spec
-	from bu_eval.tasks.hn import Front
+	from benchmark.loop import done_spec
+	from benchmark.tasks.hn import Front
 
 	spec = done_spec(Front)
 	body = json.dumps(spec.schema)
@@ -264,8 +264,8 @@ def t_done_schema() -> Check:
 
 def t_tasks() -> Check:
 	"""У каждой задачи есть схема и проверка, и проверка ловит заведомо неверные данные."""
-	from bu_eval.task import all_tasks
-	from bu_eval.tasks.clickgate import Gate, verify
+	from benchmark.task import all_tasks
+	from benchmark.tasks.clickgate import Gate, verify
 
 	bad = []
 	for name, t in all_tasks().items():
@@ -288,7 +288,7 @@ def t_fixture() -> Check:
 	"""Офлайновая фикстура генерируется и отдаётся по http."""
 	import urllib.request
 
-	from bu_eval.tasks.clickgate import setup
+	from benchmark.tasks.clickgate import setup
 
 	url = setup()
 	body = urllib.request.urlopen(url, timeout=5).read().decode()
@@ -298,7 +298,7 @@ def t_fixture() -> Check:
 
 def t_pricing() -> Check:
 	"""Цена считается по реестру и отличает известную модель от неизвестной."""
-	from bu_eval.pricing import cost_of
+	from benchmark.pricing import cost_of
 
 	known = cost_of('gpt-5-mini', 1_000_000, 0, 0)
 	unknown = cost_of('несуществующая-модель-xyz', 1000, 0, 100)
@@ -308,8 +308,8 @@ def t_pricing() -> Check:
 
 def t_report() -> Check:
 	"""Отчёт собирается из пустого и из заполненного прогона, не падая."""
-	from bu_eval.backends import RunReport
-	from bu_eval.report import line, table
+	from benchmark.backends import RunReport
+	from benchmark.report import line, table
 
 	r = RunReport(
 		task='t',
@@ -330,7 +330,7 @@ def t_report() -> Check:
 
 def t_matrix() -> Check:
 	"""Матрица разворачивается по бэкендам: одна задача на двух бэкендах — две ячейки."""
-	from bu_eval.runner import Matrix
+	from benchmark.runner import Matrix
 
 	mx = Matrix(tasks=['clickgate'], models=['openai:gpt-5-mini'], profiles=['act'], backends=['browser-use', 'bu-mcp'])
 	cells = mx.cells()

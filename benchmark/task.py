@@ -56,7 +56,7 @@ def register(task: Task[Any]) -> Task[Any]:
 
 def all_tasks() -> dict[str, Task[Any]]:
 	if not _REGISTRY:
-		from bu_eval import tasks  # noqa: F401  — импорт наполняет реестр
+		from benchmark import tasks  # noqa: F401  — импорт наполняет реестр
 	return _REGISTRY
 
 

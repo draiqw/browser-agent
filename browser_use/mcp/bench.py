@@ -58,7 +58,7 @@ from typing import Any, cast
 import websockets
 
 HERE = Path(__file__).resolve().parent
-REPO = HERE.parent
+REPO = HERE.parents[1]  # browser_use/mcp/ -> browser_use/ -> repo root
 PYTHON = str(REPO / '.venv' / 'bin' / 'python')
 CDP_URL = os.getenv('BENCH_CDP_URL', 'http://127.0.0.1:9222')
 

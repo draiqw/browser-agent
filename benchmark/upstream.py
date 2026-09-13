@@ -8,7 +8,7 @@
 моделью. Этот модуль отвечает на вопрос «что именно отвалилось» за пару секунд
 и в одном месте.
 
-    python -m bu_eval doctor
+    python -m benchmark doctor
 
 Проверки поделены на две группы:
 
@@ -19,7 +19,7 @@
   `waiting.py` (буфер lifecycle-событий, `loaderId` главного фрейма),
   `server.py`  (тексты-нооп из `tools/service.py`, мост к реестру `Tools()`).
 
-Стиль здесь fail-open, как и во всём `bu_eval`: упавшая проверка становится
+Стиль здесь fail-open, как и во всём `benchmark`: упавшая проверка становится
 строкой «СЛОМ», а не исключением на весь запуск. Наш исполнительный слой
 (`bu_mcp`) fail-closed — это осознанное расхождение, и оно не должно перетекать
 в обратную сторону.
@@ -202,7 +202,7 @@ def check_history_accounting() -> Check:
 def check_llm_classes() -> Check:
 	"""Фабрика моделей грузит классы провайдеров из browser_use по имени."""
 	import browser_use
-	from bu_eval.models import PROVIDERS
+	from benchmark.models import PROVIDERS
 
 	missing = sorted({p.cls_name for p in PROVIDERS.values() if not hasattr(browser_use, p.cls_name)})
 	return Check(
@@ -380,12 +380,17 @@ def check_dead_wait_knobs() -> Check:
 
 	Ищем именно чтение атрибута (`.minimum_wait_page_load_time`), а не любое
 	упоминание: объявления параметров и таблицы env — это не использование.
+	`browser_use/mcp/` — наш код (см. docs/WORKLOG.md, перенос bu_mcp), а не
+	апстрим, и его докстроки сами упоминают эти имена как раз в объяснение,
+	почему waiting.py существует — сканировать его тут бессмысленно.
 	"""
 	profile_src = _read('browser/profile.py')
 	declared = 'minimum_wait_page_load_time' in profile_src
 	reads = re.compile(r'\.(?:minimum_wait_page_load_time|wait_for_network_idle_page_load_time)\b')
 	users = []
 	for path in sorted(pkg_dir().rglob('*.py')):
+		if path.relative_to(pkg_dir()).as_posix().startswith('mcp/'):
+			continue
 		text = path.read_text(encoding='utf-8', errors='replace')
 		if reads.search(text):
 			users.append(path.relative_to(pkg_dir()).as_posix())
@@ -570,7 +575,7 @@ def check_headless_viewport_side_effect() -> Check:
 	"""`headless=True` при подключении по `cdp_url` тянет за собой viewport-override.
 
 	Это не наша особенность, а поведение апстрима, которое приходится ОБХОДИТЬ
-	в двух местах — `bu_mcp/server.py::_profile` и `bu_eval/backends.py::attached_profile`.
+	в двух местах — `bu_mcp/server.py::_profile` и `benchmark/backends.py::attached_profile`.
 	`detect_display_configuration` выставляет `viewport = screen` и
 	`no_viewport = False`, после чего browser-use шлёт
 	`Emulation.setDeviceMetricsOverride` на каждую вкладку, которую создаёт ИЛИ
@@ -592,7 +597,7 @@ def check_headless_viewport_side_effect() -> Check:
 	workaround_holds = fixed.viewport is None and fixed.no_viewport is True
 	ok = workaround_holds and side_effect
 	if not side_effect:
-		detail = 'побочки больше нет — обход в bu_mcp/server.py и bu_eval/backends.py можно снимать'
+		detail = 'побочки больше нет — обход в bu_mcp/server.py и benchmark/backends.py можно снимать'
 	elif not workaround_holds:
 		detail = 'ПОБОЧКА ЕСТЬ, а обход не применяется: поля viewport/no_viewport стали неизменяемыми'
 	else:

@@ -11,7 +11,7 @@ import xml.etree.ElementTree as ET
 
 from pydantic import BaseModel, Field
 
-from bu_eval.task import Task, register
+from benchmark.task import Task, register
 
 URL = 'https://www.cbr.ru/currency_base/daily/'
 XML = 'https://www.cbr.ru/scripts/XML_daily.asp'

@@ -4,7 +4,7 @@
   и оставлен намеренно: это база сравнения. Он меряет апстрим, а не нас.
 * `bu-mcp` — модель ходит в браузер ТОЛЬКО через наш MCP-сервер по stdio,
   ровно как это делал бы любой клиент. Цикл «модель ↔ инструменты» — в
-  `bu_eval.loop`, транспорт — клиент из `bu_mcp.bench` (переиспользован, а не
+  `benchmark.loop`, транспорт — клиент из `bu_mcp.bench` (переиспользован, а не
   написан заново).
 * `scripted` — та же труба, но вместо модели записанный сценарий задачи.
   Отвечает на вопрос «а решается ли задача через наш набор инструментов
@@ -18,7 +18,7 @@
 терялась чужая вкладка, другим — окно браузера выскакивало поверх работы
 владельца и забирало фокус.
 
-1. Своего браузера `bu_eval` не поднимает ВООБЩЕ, ни один бэкенд. Ветки запуска
+1. Своего браузера `benchmark` не поднимает ВООБЩЕ, ни один бэкенд. Ветки запуска
    в пакете нет, поэтому окна не может быть ни при каком флаге и ни при какой
    переменной окружения. Браузер поднимает `scripts/chrome-automation.sh`
    (headless), харнесс к нему подключается по `cdp_url` — см. `attached_profile`.
@@ -46,10 +46,10 @@ from typing import Protocol
 
 from pydantic import BaseModel
 
-from bu_eval.models import PROVIDERS, make_model, missing_key, parse_spec
-from bu_eval.pricing import cost_of, is_free
-from bu_eval.profiles import Profile
-from bu_eval.task import Task
+from benchmark.models import PROVIDERS, make_model, missing_key, parse_spec
+from benchmark.pricing import cost_of, is_free
+from benchmark.profiles import Profile
+from benchmark.task import Task
 
 # Апстрим по умолчанию шлёт анонимную телеметрию. Для работы с финансовыми
 # страницами это лишнее — выключаем, если пользователь явно не включил обратно.
@@ -126,7 +126,7 @@ def cdp_url() -> str:
 
 
 def attached_profile():
-	"""Профиль ПОДКЛЮЧЕНИЯ к чужому Chrome. Своего браузера `bu_eval` не поднимает никогда.
+	"""Профиль ПОДКЛЮЧЕНИЯ к чужому Chrome. Своего браузера `benchmark` не поднимает никогда.
 
 	Почему пути запуска здесь нет вовсе. `browser_use.Agent` строит
 	`BrowserProfile` сам и мимо `~/.config/browseruse/config.json`, а при
@@ -159,7 +159,7 @@ def attached_profile():
 			profile.viewport = None
 			profile.no_viewport = True
 		except Exception as exc:
-			print(f'[bu_eval] не смог снять viewport-override с чужого браузера: {exc!r}', file=sys.stderr)
+			print(f'[benchmark] не смог снять viewport-override с чужого браузера: {exc!r}', file=sys.stderr)
 	return profile
 
 
@@ -279,7 +279,7 @@ class BuMcpBackend:
 	async def run(self, task: Task, model: str, profile: Profile, max_steps: int) -> RunReport:
 		# Импорт здесь, а не наверху: bu_mcp.bench тянет websockets и browser_use,
 		# а базовому бэкенду он не нужен вовсе.
-		from bu_eval.loop import ToolSpec, done_spec, run_anthropic, run_openai
+		from benchmark.loop import ToolSpec, done_spec, run_anthropic, run_openai
 
 		rep = RunReport(task=task.name, model=model, profile=profile.name, backend=self.name)
 		provider, bare = parse_spec(model)
@@ -432,8 +432,8 @@ async def _bind_own_tab(client, foreign: dict[str, str]) -> tuple[str, bool]:
 	страницу — это авария, прогон прерывается. Так уже терялась чужая вкладка,
 	и повторять не будем.
 	"""
+	from benchmark.fixtures import base_url
 	from browser_use.mcp.bench import McpError, cdp_pages
-	from bu_eval.fixtures import base_url
 
 	token = f'bueval-{uuid.uuid4().hex[:8]}'
 	marker = f'{base_url()}/#{token}'

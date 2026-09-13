@@ -22,8 +22,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
-from bu_eval.fixtures import PORT, ROOT, url_for
-from bu_eval.task import Task, register
+from benchmark.fixtures import PORT, ROOT, url_for
+from benchmark.task import Task, register
 
 FIXTURE = ROOT / 'clickgate.html'
 

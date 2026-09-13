@@ -14,10 +14,10 @@ import json
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from bu_eval.backends import BACKENDS, RunReport
-from bu_eval.profiles import PROFILES
-from bu_eval.task import Task
-from bu_eval.task import get as get_task
+from benchmark.backends import BACKENDS, RunReport
+from benchmark.profiles import PROFILES
+from benchmark.task import Task
+from benchmark.task import get as get_task
 
 
 @dataclass

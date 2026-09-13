@@ -13,7 +13,7 @@ import urllib.request
 
 from pydantic import BaseModel, Field
 
-from bu_eval.task import Task, register
+from benchmark.task import Task, register
 
 URL = 'https://news.ycombinator.com/'
 API = 'https://hacker-news.firebaseio.com/v0'

@@ -28,13 +28,13 @@ allowlist доменов deny-by-default, журнал действий и по�
 решение принято осознанно, без проверки эквивалентной защиты в новом коде;
 подробности там же, в `WORKLOG.md`.
 
-## 2. `bu_eval/` — оценка агента с LLM в цикле
+## 2. `benchmark/` — оценка агента с LLM в цикле
 
-Отдельный CLI-харнесс: гоняет конкретные задачи (`bu_eval/tasks/`: `cbr.py`,
+Отдельный CLI-харнесс: гоняет конкретные задачи (`benchmark/tasks/`: `cbr.py`,
 `hn.py`, `clickgate.py`) через разные бэкенды (наш `bu-mcp` и стоковый
 `browser_use.Agent` — для сравнения) и разные LLM, считает цену и результат.
 Живёт снаружи `browser_use/`, апстрим не патчит. Как запускать —
-[`../examples/eval/README.md`](../examples/eval/README.md).
+[`../examples/benchmark/README.md`](../examples/benchmark/README.md).
 
 ## 3. `scripts/` — обвязка вокруг Chrome с CDP
 
@@ -52,13 +52,13 @@ allowlist доменов deny-by-default, журнал действий и по�
 `browser_use/browser/watchdogs/screenshot_watchdog.py`. Тоже конфликтогенно
 при обновлении апстрима, но заметно меньше по площади, чем `browser_use/mcp/`.
 
-## 5. `examples/mcp/`, `examples/eval/` — свои примеры
+## 5. `examples/mcp/`, `examples/benchmark/` — свои примеры
 
 Оригинальный `examples/` — витрина апстрима для тех, кто использует
 `browser_use.Agent` напрямую в коде; мы её не трогаем. Рядом с ней —
 `examples/mcp/` (минимальный самописный MCP-клиент на Python, без Claude Code
-и без модели в цикле — просто протокол) и `examples/eval/` (README,
-указывающий на CLI `bu_eval`).
+и без модели в цикле — просто протокол) и `examples/benchmark/` (README,
+указывающий на CLI `benchmark`).
 
 ## 6. Чего нет / не проверено
 

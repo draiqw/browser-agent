@@ -82,8 +82,8 @@ PYTHONPATH=. python -m browser_use.mcp.macro run ИМЯ   # повтор мак�
 
 Минимальный самописный MCP-клиент на Python (без Claude Code, без агента с
 LLM в цикле) — [`examples/mcp/`](../examples/mcp/). Оценка агента с LLM в
-цикле на этом слое — [`examples/eval/`](../examples/eval/) (указывает на
-`bu_eval`, деньги/ключ провайдера нужны).
+цикле на этом слое — [`examples/benchmark/`](../examples/benchmark/) (указывает на
+`benchmark`, деньги/ключ провайдера нужны).
 
 Вкладки создаются фоновыми (`background=true`), а окно спрятано, поэтому Chrome
 считает страницу невидимой и не отдаёт ей ввод. Лечится эмуляцией фокуса на каждой

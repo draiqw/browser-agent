@@ -7,7 +7,7 @@
 (`domain_gate.py`, `cdp_session.py`, `registry_bridge.py`, `noop.py`, `delta.py`,
 `journal.py`, `macro.py`, `state.py`, `resolve.py`, `waiting.py`, `downloads.py`,
 `uploads.py`, `actions/`). Это значит, что `browser_use/mcp/` при обновлении
-апстрима будет конфликтовать почти гарантированно — в отличие от `bu_eval/` и
+апстрима будет конфликтовать почти гарантированно — в отличие от `benchmark/` и
 `scripts/`, которые снаружи и не патчены. Плюс ещё 5 файлов библиотеки точечно
 тронуты отдельно (`browser_use/actor/page.py`, `browser_use/browser/profile.py`,
 `session.py`, `session_manager.py`, `watchdogs/screenshot_watchdog.py`) — фиксы
@@ -67,7 +67,7 @@ Chrome-автоматизация подвисает посреди прогон
 
 ## Авторство и лицензия
 
-Наш код (`browser_use/mcp/`, `bu_eval/`, `scripts/`, плюс точечные правки в
+Наш код (`browser_use/mcp/`, `benchmark/`, `scripts/`, плюс точечные правки в
 `browser_use/actor/`, `browser_use/browser/` — см. выше) — © 2026 Roman Akramov
 ([@draiqw](https://github.com/draiqw)), MIT.
 

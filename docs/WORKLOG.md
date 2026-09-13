@@ -7,6 +7,55 @@
 Контракты модулей — [`CONTRACTS.md`](CONTRACTS.md), журнал и макросы —
 [`JOURNAL_CONTRACT.md`](JOURNAL_CONTRACT.md), обзор слоя — [`BU_MCP.md`](BU_MCP.md).
 
+## 2026-09-13 — bu_eval → benchmark, удалены мёртвые доки/Docker, найдены 2 бага переноса
+
+Переименование: `bu_eval/` → `benchmark/`, `examples/eval/` → `examples/benchmark/`.
+Механическая замена `\bbu_eval\b` → `benchmark` во всех `.py`/`.md` (env-переменные
+`BU_EVAL_*` не тронуты — публичный конфиг, как раньше `BU_MCP_*` при переезде
+`bu_mcp`).
+
+Удалены как мёртвые (не читались ни кодом, ни CI, ни README/CLAUDE.md —
+проверено `grep`): `AGENTS.md`, `BETA_AGENT_INTEGRATION_FEATURES.md`,
+`CLOUD.md` (апстримные доки под контрибьютинг/Rust-агента/облако — не про
+этот форк), `Dockerfile`, `Dockerfile.fast`, `docker/`, `.dockerignore`
+(мы гоняем локальный Chrome через CDP, а не контейнеризируем браузер; CI под
+это уже был отключён раньше — `docker.yml.disabled`).
+
+**После переноса `bench doctor`/`benchmark selftest` поймали 2 реальных бага,
+оставшихся от более раннего разбиения `server.py` на подмодули и от
+сегодняшнего переезда `bu_mcp` → `browser_use/mcp/` — раньше их никто не
+гонял:**
+
+1. `NOOP_MARKERS`, `NEW_TAB_CLAIM_RE`, `NEW_TAB_NOTE_RE` переехали в
+   `server_shared.py` при разбиении `server.py`, но не были реэкспортированы
+   обратно из `server.py` (в отличие от `JOURNAL_FIELDS`, который сделали
+   правильно). `benchmark/upstream.py` их так и ждёт с `browser_use.mcp.server`
+   — падало `ImportError`. Починено реэкспортом.
+2. `browser_use/mcp/bench.py` и `browser_use/mcp/smoke.py` считали корень
+   репозитория как `Path(__file__).resolve().parent` — это было верно, когда
+   файлы лежали прямо в `bu_mcp/` (один уровень от корня), но после переезда в
+   `browser_use/mcp/` (два уровня) `REPO`/`ROOT` стали указывать на
+   `browser_use/`, а не на корень. `bench.py` из-за этого пытался запустить
+   несуществующий `browser_use/.venv/bin/python` — `FileNotFoundError`.
+   `smoke.py` та же ошибка маскировалась editable-инсталлом (`browser_use`
+   всё равно резолвился без верного `PYTHONPATH`), поэтому 85/1 при прошлой
+   проверке был не врал, но `ROOT` там тоже был битым — поправлено на
+   `.parents[1]`/`.parents[2]` в обоих файлах.
+
+Заодно проверка `check_dead_wait_knobs` в `benchmark/upstream.py` теперь
+исключает `browser_use/mcp/` из сканирования (это наш код с 2026-09-13, не
+апстрим — её же докстрока упоминает имена мёртвых полей апстрима как прозу,
+что раньше давало ложный `СЛОМ`).
+
+**Проверено:** `benchmark doctor` — все допущения снова OK, кроме
+`viewport-override при headless` (не регрессия — воспроизводится и на чистом
+коде до всех сегодняшних правок, чисто рантайм/окружение). `benchmark selftest`
+— 11/11 OK. Полный `tests/ci` (1152 теста) — на чистом коде и на коде с
+сегодняшними правками ОДИНАКОВЫЙ результат: 1113 passed / 34 skipped
+(2 теста в `test_beta_agent.py` нестабильны при полном xdist-прогоне
+независимо от наших правок — по отдельности оба проходят; воспроизведено на
+чистом HEAD тоже, так что это не регрессия).
+
 ## 2026-09-13 — удалён мёртвый /skills/, починена регрессия в его тесте
 
 Корневой `/skills/` (Claude-Skill-формат: `browser-use/SKILL.md`,
@@ -49,7 +98,7 @@ bu_mcp/server.py browser_use/mcp/server.py`, остальные модули (`s
 СНАРУЖИ библиотеки и её код не трогал вовсе; теперь `browser_use/mcp/server.py`
 и соседи в этой директории — наш код на месте апстримного, со всеми вытекающими
 последствиями для будущих обновлений апстрима (конфликт почти гарантирован
-именно в `browser_use/mcp/`, в отличие от `bu_eval/`/`scripts/`, которые
+именно в `browser_use/mcp/`, в отличие от `benchmark/`/`scripts/`, которые
 остались снаружи).
 
 `browser_use/mcp/__init__.py`: ленивый экспорт `BrowserUseServer` заменён на
@@ -60,7 +109,7 @@ bu_mcp/server.py browser_use/mcp/server.py`, остальные модули (`s
 без правок диспетчера.
 
 Все реальные пути поправлены: статические импорты (`from bu_mcp.X import` во
-всех модулях `browser_use/mcp/` и в `bu_eval/{selftest,backends,upstream}.py`),
+всех модулях `browser_use/mcp/` и в `benchmark/{selftest,backends,upstream}.py`),
 ленивые `importlib.import_module('bu_mcp.X')` (`server_shared.bu_mcp_module`,
 `macro.py`, `journal.py`), строковые аргументы подпроцесса (`smoke.py`:
 `args=['-m', 'bu_mcp.server']` x2; `bench.py`: `argv=[...,'-m','bu_mcp.server']`),
@@ -72,7 +121,7 @@ bu_mcp/server.py browser_use/mcp/server.py`, остальные модули (`s
 переменные окружения (публичный конфиг, путь кода на них не влияет), ключ
 `"bu-mcp"` в `~/.claude.json`/`mcp__bu-mcp__*` имена тулов (это имя MCP-сервера,
 а не модуля), бренд-упоминания "bu_mcp" в прозе бенчмарк-отчётов
-(`browser_use/mcp/bench.py`) и в `bu_eval/*` — там это название нашего слоя,
+(`browser_use/mcp/bench.py`) и в `benchmark/*` — там это название нашего слоя,
 не путь к коду.
 
 Удалены 2 CI-теста апстрима, привязанные к внутренностям штатного

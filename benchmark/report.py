@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from bu_eval.backends import RunReport
+from benchmark.backends import RunReport
 
 
 def _money(c: float | None) -> str:

@@ -1,11 +1,11 @@
 """Командная строка харнесса.
 
-    python -m bu_eval doctor      состояние допущений об апстриме (харнесс + bu_mcp)
-    python -m bu_eval selftest    проверить сам харнесс, без LLM и без денег
-    python -m bu_eval models      какие провайдеры готовы к работе
-    python -m bu_eval tasks       список задач, профилей и бэкендов
-    python -m bu_eval run -t clickgate -m openai:gpt-5-mini -b bu-mcp
-    python -m bu_eval run -t clickgate -m openai:gpt-5-mini -b bu-mcp -b browser-use -r 3
+    python -m benchmark doctor      состояние допущений об апстриме (харнесс + bu_mcp)
+    python -m benchmark selftest    проверить сам харнесс, без LLM и без денег
+    python -m benchmark models      какие провайдеры готовы к работе
+    python -m benchmark tasks       список задач, профилей и бэкендов
+    python -m benchmark run -t clickgate -m openai:gpt-5-mini -b bu-mcp
+    python -m benchmark run -t clickgate -m openai:gpt-5-mini -b bu-mcp -b browser-use -r 3
 
 Прогоны стоят денег. Матрица печатает свой размер до старта, а `--dry-run`
 показывает ячейки и не тратит ни цента.
@@ -30,7 +30,7 @@ load_dotenv(os.getenv('BU_EVAL_ENV_FILE') or None)
 
 
 def cmd_doctor(args) -> int:
-	from bu_eval.upstream import run_all, version
+	from benchmark.upstream import run_all, version
 
 	print(f'browser-use {version()}')
 	bad = 0
@@ -43,12 +43,12 @@ def cmd_doctor(args) -> int:
 		print(('  OK    ' if c.ok else '  СЛОМ  ') + f'{c.name:32} {c.detail}')
 		bad += not c.ok
 	if bad:
-		print(f'\nСломано допущений: {bad}. Смотри bu_eval/upstream.py — там написано, на что именно мы опирались и что чинить.')
+		print(f'\nСломано допущений: {bad}. Смотри benchmark/upstream.py — там написано, на что именно мы опирались и что чинить.')
 	return 1 if bad else 0
 
 
 def cmd_selftest(args) -> int:
-	from bu_eval.selftest import run_all
+	from benchmark.selftest import run_all
 
 	bad = 0
 	for c in run_all():
@@ -58,7 +58,7 @@ def cmd_selftest(args) -> int:
 
 
 def cmd_models(args) -> int:
-	from bu_eval.models import available
+	from benchmark.models import available
 
 	for name, ok, note in available():
 		print(f'  {"готов" if ok else "  —  "}  {name:12} {note}')
@@ -70,9 +70,9 @@ def cmd_models(args) -> int:
 
 
 def cmd_tasks(args) -> int:
-	from bu_eval.backends import BACKENDS
-	from bu_eval.profiles import MCP_ALL, PROFILES
-	from bu_eval.task import all_tasks
+	from benchmark.backends import BACKENDS
+	from benchmark.profiles import MCP_ALL, PROFILES
+	from benchmark.task import all_tasks
 
 	print('ЗАДАЧИ')
 	for name, t in sorted(all_tasks().items()):
@@ -94,8 +94,8 @@ def cmd_tasks(args) -> int:
 
 
 def cmd_run(args) -> int:
-	from bu_eval import report as rep_mod
-	from bu_eval.runner import Matrix, run_matrix, save
+	from benchmark import report as rep_mod
+	from benchmark.runner import Matrix, run_matrix, save
 
 	mx = Matrix(
 		tasks=args.task,
@@ -133,7 +133,7 @@ def cmd_run(args) -> int:
 
 
 def main(argv=None) -> int:
-	p = argparse.ArgumentParser(prog='bu_eval', description='Оценка bu_mcp с моделью в цикле')
+	p = argparse.ArgumentParser(prog='benchmark', description='Оценка bu_mcp с моделью в цикле')
 	sub = p.add_subparsers(dest='cmd', required=True)
 
 	sub.add_parser('doctor', help='состояние допущений об апстриме').set_defaults(fn=cmd_doctor)

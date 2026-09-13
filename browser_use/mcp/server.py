@@ -157,6 +157,15 @@ from browser_use.mcp.server_shared import BRIDGE_EXCLUDE, JOURNALED_TOOLS, SECUR
 from browser_use.mcp.server_shared import (
 	JOURNAL_FIELDS as JOURNAL_FIELDS,  # re-exported: browser_use.mcp.smoke reads it off this module
 )
+from browser_use.mcp.server_shared import (
+	NEW_TAB_CLAIM_RE as NEW_TAB_CLAIM_RE,  # re-exported: benchmark/upstream.py reads it off this module
+)
+from browser_use.mcp.server_shared import (
+	NEW_TAB_NOTE_RE as NEW_TAB_NOTE_RE,  # re-exported: benchmark/upstream.py reads it off this module
+)
+from browser_use.mcp.server_shared import (
+	NOOP_MARKERS as NOOP_MARKERS,  # re-exported: benchmark/upstream.py reads it off this module
+)
 from browser_use.tools.service import Tools
 
 logger = logging.getLogger('browser_use.mcp.server')
