@@ -7,6 +7,36 @@
 Контракты модулей — [`CONTRACTS.md`](CONTRACTS.md), журнал и макросы —
 [`JOURNAL_CONTRACT.md`](JOURNAL_CONTRACT.md), обзор слоя — [`BU_MCP.md`](BU_MCP.md).
 
+## 2026-09-13 — удалён мёртвый /skills/, починена регрессия в его тесте
+
+Корневой `/skills/` (Claude-Skill-формат: `browser-use/SKILL.md`,
+`open-source/`, `cloud/`, `qa/`, `remote-browser/`, `x402/`) — это контент под
+штатный `browser-use skill install`, который мы уже вычистили из README.
+Ничем в коде не читался (проверено `grep` по всем `.py`), удалён целиком.
+
+Важно не путать с `browser_use/skills/` (библиотечный модуль, `SkillService`) —
+это отдельная фича, выполнение скиллов через Browser Use Cloud API, реально
+используется в `Agent.__init__` (`skills=`/`skill_ids=`), `browser_use/cli.py`,
+`browser_use/mcp/cli_mcp.py`. Его не трогали — удаление сломало бы импорт
+самого класса `Agent`.
+
+Попутно нашли и почини регрессию, которую пропустили раньше: правка README
+(строка `run \`browser-use skill install\` to register the skill` была убрана
+вместе с секцией Quickstart) уже ломала
+`tests/ci/test_browser_use_skill_install_docs.py::test_docs_install_browser_use_skill_from_package_alias`,
+просто никто не гонял `tests/ci` целиком после того коммита. Плюс 2 теста в
+том же файле читали контент удалённого `/skills/` напрямую
+(`test_cloud_v4_reference_scopes_workspace_file_listing`,
+`test_remote_browser_skill_uses_current_cli`). Убрали все три, оставили 2
+теста поведения `browser-use cli skill install` (они не про README/`/skills/`,
+а про реальный код `browser_use/skills/browser_use.py` — им ничего не
+угрожало). `uv run ruff check` + `pytest` по файлу — 2/2 зелёных.
+
+`.github/workflows/install-script.yml` триггерится на push при изменении
+`skills/browser-use/SKILL.md` и гоняет `scripts/sync_browser_harness_skill.py
+--check`, который бы теперь падал (файла нет) — отключили тем же способом,
+что раньше `docker.yml` (`.disabled`).
+
 ## 2026-09-13 — bu_mcp перенесён в browser_use/mcp/
 
 `bu_mcp/` физически переехал в `browser_use/mcp/`, заменив штатный MCP-сервер
