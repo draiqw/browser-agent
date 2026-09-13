@@ -1,14 +1,18 @@
 # browser-agent — доработанная версия browser-use
 
 Это форк [browser-use/browser-use](https://github.com/browser-use/browser-use) (MIT,
-© Gregor Zunic) с надстройкой `bu_mcp/` — своим MCP-сервером поверх библиотеки.
-Слой работает над публичными интерфейсами browser-use (`Tools()`, `BrowserSession`,
-DOM-сериализатор), не форкая их логику. Точечно тронуты 5 файлов самой библиотеки
-(`browser_use/actor/page.py`, `browser_use/browser/profile.py`, `session.py`,
-`session_manager.py`, `watchdogs/screenshot_watchdog.py`) — фиксы фокуса и
-скриншотов для фоновых вкладок со скрытым окном, подробности в
-[`docs/WORKLOG.md`](docs/WORKLOG.md). Это может конфликтовать при обновлении
-апстрима, в отличие от остального слоя.
+© Gregor Zunic) со своим MCP-сервером, `browser_use/mcp/server.py` (класс
+`BuMcpServer`), который напрямую ЗАМЕНЯЕТ штатный `BrowserUseServer` апстрима —
+не живёт рядом, а физически лежит на его месте, вместе с подмодулями
+(`domain_gate.py`, `cdp_session.py`, `registry_bridge.py`, `noop.py`, `delta.py`,
+`journal.py`, `macro.py`, `state.py`, `resolve.py`, `waiting.py`, `downloads.py`,
+`uploads.py`, `actions/`). Это значит, что `browser_use/mcp/` при обновлении
+апстрима будет конфликтовать почти гарантированно — в отличие от `bu_eval/` и
+`scripts/`, которые снаружи и не патчены. Плюс ещё 5 файлов библиотеки точечно
+тронуты отдельно (`browser_use/actor/page.py`, `browser_use/browser/profile.py`,
+`session.py`, `session_manager.py`, `watchdogs/screenshot_watchdog.py`) — фиксы
+фокуса и скриншотов для фоновых вкладок со скрытым окном, подробности в
+[`docs/WORKLOG.md`](docs/WORKLOG.md).
 
 **Зачем.** Штатный MCP-сервер отдаёт клиенту 5 страничных примитивов и плоский JSON
 состояния. Разбор кода и бенчмарк на 16 живых сайтах вскрыли ряд проблем, которые
@@ -31,19 +35,22 @@ DOM-сериализатор), не форкая их логику. Точечн
 | загрузка файлов | нет | `upload_file` из папки вложений, allowlist по инструментам |
 | фоновая вкладка (окно скрыто) | не принимает ввод | сторож фокуса эмуляцией, ввод проходит |
 
-Подробности, замеры и известные ограничения — [`docs/BU_MCP.md`](docs/BU_MCP.md).
+Общая карта всего форка (что где лежит и зачем) — [`docs/OVERVIEW.md`](docs/OVERVIEW.md).
+Подробности, замеры и известные ограничения MCP-слоя — [`docs/BU_MCP.md`](docs/BU_MCP.md).
 Методика и полные результаты бенчмарка — [`docs/BENCH.md`](docs/BENCH.md),
-сырые данные в `bu_mcp/bench_results.json`. Что менялось и почему, с проверками
-и тупиками — [`docs/WORKLOG.md`](docs/WORKLOG.md).
+сырые данные в `browser_use/mcp/bench_results.json`. Что менялось и почему, с
+проверками и тупиками — [`docs/WORKLOG.md`](docs/WORKLOG.md).
 
 ```bash
 scripts/chrome-automation.sh          # Chrome с CDP на 9222, окно скрыто
 scripts/chrome-automation.sh login    # показать окно, чтобы залогиниться руками
 scripts/chrome-automation.sh status   # что работает и в каком режиме
 scripts/chrome-automation.sh list     # все профили: порт, состояние, каталог
-PYTHONPATH=. python -m bu_mcp.server        # MCP-сервер, транспорт stdio
-PYTHONPATH=. python bu_mcp/smoke.py         # проверки на живом браузере
-PYTHONPATH=. python -m bu_mcp.macro run ИМЯ # повтор макроса без модели
+browser-use --mcp                                    # то же самое, штатной командой CLI
+PYTHONPATH=. python -m browser_use.mcp.server         # MCP-сервер напрямую, транспорт stdio
+PYTHONPATH=. python browser_use/mcp/smoke.py          # проверки на живом браузере
+PYTHONPATH=. python -m browser_use.mcp.macro run ИМЯ  # повтор макроса без модели
+uv run python examples/mcp/connect_and_browse.py       # минимальный свой MCP-клиент, для примера
 ```
 
 Полный список подкоманд `chrome-automation.sh` (`show`/`hide`/`install`/`stop`)
@@ -60,13 +67,14 @@ Chrome-автоматизация подвисает посреди прогон
 
 ## Авторство и лицензия
 
-Надстройка (`bu_mcp/`, `bu_eval/`, `scripts/`) — © 2026 Roman Akramov
+Наш код (`browser_use/mcp/`, `bu_eval/`, `scripts/`, плюс точечные правки в
+`browser_use/actor/`, `browser_use/browser/` — см. выше) — © 2026 Roman Akramov
 ([@draiqw](https://github.com/draiqw)), MIT.
 
-Всё остальное — browser-use, © 2024 Gregor Zunic, MIT. Его код здесь не изменён
-ни строкой, и авторское уведомление сохранено в [`LICENSE`](LICENSE) как того
-требует лицензия. Условия у обеих частей одни и те же, так что практической
-разницы для пользователя нет — разделение нужно, чтобы было видно, кто что писал.
+Всё остальное — browser-use, © 2024 Gregor Zunic, MIT, и авторское уведомление
+сохранено в [`LICENSE`](LICENSE) как того требует лицензия. Условия у обеих
+частей одни и те же, так что практической разницы для пользователя нет —
+разделение нужно, чтобы было видно, кто что писал.
 
 Родственный проект — [computer-agent](https://github.com/draiqw/computer-agent):
 та же идея, но работа делается файлами и шеллом, а не страницами.
@@ -136,51 +144,6 @@ https://github.com/user-attachments/assets/485fd3ec-61b9-4afc-9e86-ee9b85acb592
 
 [Browser Use Cloud Docs ↗](https://docs.browser-use.com/cloud/quickstart)
 
-
-<br/>
-
-# Python library: the easiest way to automate the web
-
-Want to automate the web at scale, from your own code, and with any LLM? Use the Python library:
-
-**1. Install Browser Use (Python >= 3.11):**
-
-```bash
-uv add browser-use
-# or: pip install browser-use
-```
-
-**2. Add your LLM API key to `.env`**. Get one from [Browser Use Cloud](https://cloud.browser-use.com/new-api-key?utm_source=github&utm_medium=readme-quickstart-api-key), or bring your own provider key:
-
-```bash
-# .env
-BROWSER_USE_API_KEY=your-key
-# GOOGLE_API_KEY=your-key
-# ANTHROPIC_API_KEY=your-key
-```
-
-**3. Run your first agent:**
-
-```python
-import asyncio
-
-from browser_use import Agent, ChatBrowserUse
-
-async def main():
-    agent = Agent(
-        task="Find the number of stars of the browser-use repo",
-        llm=ChatBrowserUse(model='openai/gpt-5.5'),
-        # llm=ChatBrowserUse(model='bu-2-0-mini-preview'),  # Browser Use's optimized model
-        # llm=ChatOpenAI(model='gpt-5.5'),
-        # llm=ChatAnthropic(model='claude-opus-4-8'),  # Sonnet also works well
-    )
-    history = await agent.run()
-
-if __name__ == "__main__":
-    asyncio.run(main())
-```
-
-Check out the [library docs](https://docs.browser-use.com/open-source/introduction) and the [cloud docs](https://docs.cloud.browser-use.com?utm_source=github&utm_medium=readme-cloud-docs) for more!
 
 <br/>
 
