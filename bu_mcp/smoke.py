@@ -12,6 +12,7 @@
 from __future__ import annotations
 
 import asyncio
+import importlib
 import json
 import os
 import re
@@ -721,21 +722,25 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 	print('\n[10c] contract: journal envelope / failure isolation / macro names (pure)')
 	import types as _types
 
-	open_ = getattr(BuMcpServer, '_journal_open', None)
-	write = getattr(BuMcpServer, '_journal_write', None)
-	outcome = getattr(BuMcpServer, '_journal_outcome', None)
-	macro_name = getattr(BuMcpServer, '_macro_name', None)
-	macro_urls = getattr(BuMcpServer, '_macro_urls', None)
-	summary = getattr(BuMcpServer, '_journal_summary', None)
+	journal_mod_ = importlib.import_module('bu_mcp.journal')
+	macro_mod_ = importlib.import_module('bu_mcp.macro')
+	# Перенесено из BuMcpServer в bu_mcp.journal / bu_mcp.macro при разбиении
+	# server.py на подмодули (docs/WORKLOG.md) — ровно те же функции, другой дом.
+	open_ = getattr(journal_mod_, 'open_entry', None)
+	write = getattr(journal_mod_, 'write', None)
+	outcome = getattr(journal_mod_, 'outcome', None)
+	macro_name = getattr(macro_mod_, 'validate_macro_name', None)
+	macro_urls = getattr(macro_mod_, 'urls_for_gate', None)
+	summary = getattr(journal_mod_, 'summary', None)
 	missing_helpers = [
 		n
 		for n, f in (
-			('_journal_open', open_),
-			('_journal_write', write),
-			('_journal_outcome', outcome),
-			('_macro_name', macro_name),
-			('_macro_urls', macro_urls),
-			('_journal_summary', summary),
+			('journal.open_entry', open_),
+			('journal.write', write),
+			('journal.outcome', outcome),
+			('macro.validate_macro_name', macro_name),
+			('macro.urls_for_gate', macro_urls),
+			('journal.summary', summary),
 		)
 		if f is None
 	]

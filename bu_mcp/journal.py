@@ -39,15 +39,19 @@ MCP решает это тем, что каждый вызов возвраща�
 
 from __future__ import annotations
 
+import importlib
 import json
 import logging
 import os
 import re
 import time
 import unicodedata
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
+
+from bu_mcp.server_shared import NoopResultError, ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -1074,6 +1078,236 @@ def journals() -> list[Path]:
 	if not directory.is_dir():
 		return []
 	return sorted(directory.glob('*.jsonl'))
+
+
+# --------------------------------------------------------------------------- #
+# Запись текущего вызова: открыть -> дописывать -> отдать в record()
+# --------------------------------------------------------------------------- #
+#
+# Перенесено из bu_mcp.server при разбиении на подмодули (docs/WORKLOG.md).
+# Раньше это были методы BuMcpServer; ни один из них не трогал self, поэтому
+# здесь они обычные функции модуля.
+
+#: Запись журнала ТЕКУЩЕГО вызова. ``ContextVar``, а не глобальная переменная:
+#: низкоуровневый ``mcp.server.Server`` вызывает хендлеры в общем событийном
+#: цикле и не обязан сериализовать их между собой, поэтому общая переменная
+#: склеила бы записи двух одновременных действий в одну. ``ContextVar`` живёт
+#: в контексте задачи.
+ACTIVE_ENTRY: ContextVar[dict[str, Any] | None] = ContextVar('bu_mcp_journal_active_entry', default=None)
+
+
+def open_entry(tool: str, params: dict[str, Any]) -> dict[str, Any]:
+	"""Пустая запись со всеми контрактными ключами и временем начала.
+
+	Ключи проставляются ВСЕ и сразу, даже пустые: читателю журнала (и
+	``to_macro``) не приходится гадать, «поля нет» или «поле не заполнилось».
+	"""
+	return {
+		'ts': time.time(),
+		'tool': tool,
+		'params': dict(params or {}),
+		'handle': None,
+		'url_before': None,
+		'url_after': None,
+		'delta': None,
+		'outcome': None,
+		'error': None,
+		# Цена самого журнала: снятие хендла + сборка конверта. В контракте
+		# этого поля нет, но без него нечем ответить на вопрос «сколько
+		# стоит запись», а он тут ровно такой же законный, как у delta.
+		'cost_ms': 0.0,
+	}
+
+
+def note(**fields: Any) -> None:
+	"""Дописать поля в запись текущего вызова. Вне журналируемого вызова — no-op."""
+	entry = ACTIVE_ENTRY.get()
+	if entry is not None:
+		entry.update(fields)
+
+
+async def capture_entry(session: Any, index: Any = None) -> None:
+	"""Снять в запись всё, что нужно повтору: хендл элемента и контекст страницы.
+
+	Это ОДИН вызов ``capture``, а не сборка хендла здесь. Разница не
+	косметическая: ``capture`` кладёт в запись ещё и ``page`` — заголовок и
+	вьюпорт, — а вьюпорт нужен ``macro.run`` как предусловие. Адаптивная
+	вёрстка меняет НАБОР элементов, а не их расположение: сценарий,
+	записанный на 1440px, в 375px падает на «кнопки нет», хотя кнопка есть —
+	она уехала в гамбургер. Без записанного вьюпорта проверка деградирует до
+	предупреждения «вьюпорт не записан», и причину отказа установить нечем.
+
+	Что именно достойно записи, решает журнал, а не сервер: собирая хендл
+	здесь, мы молча решали это за него — и ровно поэтому ``page`` не попадал
+	в записи вовсе.
+
+	``index=None`` — законный случай (``send_keys``, ``browser_navigate``,
+	``scroll`` без элемента): тогда снимается только контекст страницы, и
+	``recorded_on`` макроса всё равно получает вьюпорт, с какого бы шага
+	сценарий ни начинался.
+
+	Вызывать ДО действия и по УЖЕ разрешённому индексу: после клика элемент
+	может исчезнуть, а до резолва индекс мог указывать не туда.
+
+	``url_before`` из ``capture`` ставится только если его ещё нет: там, где
+	рядом снимается проба дельты, URL уже взят из неё, и переписывать его
+	более поздним значением незачем.
+
+	Fail-open по построению: ``capture`` не бросает вовсе, а при выключенном
+	журнале (``BU_MCP_JOURNAL=0``) возвращает пустой dict. Замерено на
+	headless Chrome, медианы: ``describe_handle`` 1.58 мс -> ``capture``
+	2.12 мс, из них 0.51 мс — тот самый ``Runtime.evaluate`` за url/title/
+	вьюпорт. Дельта, к которой запись пристёгнута, стоит 7.8 мс.
+	"""
+	entry = ACTIVE_ENTRY.get()
+	if entry is None:
+		return
+	started = time.perf_counter()
+	try:
+		captured = await capture(session, None if index is None else int(index))
+	except Exception as exc:
+		# Сюда попадает только мусор в index: сам capture гасит свои ошибки внутри.
+		captured = {}
+		entry['handle_error'] = f'{type(exc).__name__}: {exc}'
+	if captured.get('handle') is not None:
+		entry['handle'] = captured['handle']
+	elif index is not None and 'handle_error' not in entry:
+		entry['handle_error'] = (
+			f'journal.capture returned no handle for index {index}: the element is not in the current '
+			f'snapshot, so this step has nothing to replay from'
+		)
+	if captured.get('page'):
+		entry['page'] = captured['page']
+	if captured.get('url_before') and not entry.get('url_before'):
+		entry['url_before'] = captured['url_before']
+	entry['cost_ms'] = float(entry.get('cost_ms') or 0.0) + (time.perf_counter() - started) * 1000.0
+
+
+def outcome(entry: dict[str, Any]) -> str:
+	"""``ok`` / ``noop`` / ``error`` из того, что уже собрано в записи.
+
+	``noop`` — это не только явный ``NOOP_MARKERS``, но и пустая дельта при
+	рапорте об успехе (``no_effect``). Смысл тот же, что у флага в ответе:
+	шаг, после которого на странице ничего не сдвинулось, нельзя считать
+	сделанным — ни клиенту, ни ``to_macro``.
+	"""
+	if entry.get('error'):
+		return 'error'
+	delta = entry.get('delta')
+	if isinstance(delta, dict) and delta.get('no_effect'):
+		return 'noop'
+	return 'ok'
+
+
+def write(entry: dict[str, Any]) -> None:
+	"""Отдать запись в ``bu_mcp.journal.record``. НИКОГДА не бросает наружу.
+
+	Журнал — наблюдатель, а не участник. Если модуля нет (например, тестовый
+	стаб в ``sys.modules``) или запись сломалась, действие всё равно обязано
+	вернуть клиенту свой результат: потерять журнал дешевле, чем потерять
+	действие. Поэтому и импорт, и сама запись гасятся в лог. Импорт лениво
+	через ``importlib``, а не прямой вызов локального ``record`` — так это
+	место остаётся перехватываемым (тесты подменяют ``sys.modules['bu_mcp.journal']``
+	целиком, и запись обязана уважать подмену).
+	"""
+	started = time.perf_counter()
+	if entry.get('outcome') is None:
+		entry['outcome'] = outcome(entry)
+	entry['cost_ms'] = round(float(entry.get('cost_ms') or 0.0) + (time.perf_counter() - started) * 1000.0, 3)
+	try:
+		journal_mod = importlib.import_module('bu_mcp.journal')
+	except Exception as exc:
+		logger.warning('bu_mcp.journal is unavailable, %s was not recorded: %r', entry.get('tool'), exc)
+		return
+	try:
+		journal_mod.record(entry)
+	except Exception as exc:
+		logger.warning('journal.record failed for %s: %r', entry.get('tool'), exc)
+
+
+async def run_journaled(tool: str, args: dict[str, Any], run: Any) -> Any:
+	"""Выполнить инструмент и записать в журнал ЛЮБОЙ его исход.
+
+	Отказ пишется наравне с успехом: журнал существует, чтобы восстановить,
+	что происходило, а не только то, что получилось. Исключение всегда
+	переподнимается — журнал не глотает ошибок инструмента.
+
+	Запись идёт в ``finally``, то есть даже при отмене задачи (``CancelledError``)
+	мы не теряем факт того, что действие было начато.
+	"""
+	entry = open_entry(tool, args)
+	token = ACTIVE_ENTRY.set(entry)
+	if tool != 'checkpoint':
+		# Точка отсчёта для «что скачалось»: до действия, а не до проверки.
+		# Сам чекпоинт её не сдвигает — иначе он затирал бы то, что измеряет.
+		try:
+			importlib.import_module('bu_mcp.downloads').mark_baseline()
+		except Exception:
+			pass
+	try:
+		return await run(args)
+	except NoopResultError as exc:
+		entry['outcome'], entry['error'] = 'noop', str(exc)
+		raise
+	except BaseException as exc:
+		entry['outcome'], entry['error'] = 'error', f'{type(exc).__name__}: {exc}'
+		raise
+	finally:
+		ACTIVE_ENTRY.reset(token)
+		write(entry)
+
+
+def summary(entry: dict[str, Any]) -> dict[str, Any]:
+	"""Выжимка записи: достаточно, чтобы выбрать шаги для макроса, и не больше.
+
+	Полный хендл (xpath, атрибуты, session_id) в листинге не нужен — он нужен
+	повтору. Печатать его на каждую строку значило бы утроить ответ ради
+	данных, которые модель всё равно не читает.
+	"""
+	handle = entry.get('handle') or {}
+	delta = entry.get('delta') or {}
+	out: dict[str, Any] = {
+		'ts': entry.get('ts'),
+		'tool': entry.get('tool'),
+		'params': entry.get('params'),
+		'outcome': entry.get('outcome'),
+		'url': entry.get('url_after') or entry.get('url_before'),
+	}
+	if isinstance(handle, dict) and handle:
+		short = {k: handle.get(k) for k in ('index', 'tag', 'role', 'accessible_name') if handle.get(k) is not None}
+		out['handle'] = short
+	if isinstance(delta, dict) and delta:
+		out['delta'] = {k: delta[k] for k in ('changed', 'status', 'no_effect') if k in delta}
+	if entry.get('error'):
+		out['error'] = str(entry['error'])[:200]
+	if entry.get('cost_ms') is not None:
+		out['cost_ms'] = entry.get('cost_ms')
+	return out
+
+
+def read_entries(args: dict[str, Any]) -> tuple[list[dict[str, Any]], Path | None]:
+	"""``read`` с понятной ошибкой + путь, из которого читали."""
+	path = Path(str(args['path'])).expanduser() if args.get('path') else None
+	try:
+		entries = read(path)
+	except Exception as exc:
+		raise ToolError(f'journal.read({path}) failed: {type(exc).__name__}: {exc}') from exc
+	if not isinstance(entries, list):
+		raise ToolError(f'journal.read returned {type(entries).__name__}, expected a list of entries.')
+	return entries, path
+
+
+__all__ += [
+	'ACTIVE_ENTRY',
+	'open_entry',
+	'note',
+	'capture_entry',
+	'outcome',
+	'write',
+	'run_journaled',
+	'summary',
+	'read_entries',
+]
 
 
 # --------------------------------------------------------------------------- #

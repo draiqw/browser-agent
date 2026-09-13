@@ -42,11 +42,15 @@ from __future__ import annotations
 
 import asyncio
 import importlib
+import json
 import logging
 import re
 import sys
 import time
+from pathlib import Path
 from typing import Any, cast
+
+from bu_mcp.server_shared import BU_MCP_HOME, MACRO_NAME_RE, ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +65,13 @@ __all__ = [
 	'DEFAULT_STEP_TIMEOUT',
 	'DEFAULT_SETTLE_TIMEOUT',
 	'DEFAULT_CHECKPOINT_TIMEOUT',
+	'macro_dir',
+	'validate_macro_name',
+	'macro_file_path',
+	'resolve_values',
+	'urls_for_gate',
+	'build_and_save',
+	'pick_journal_entries',
 ]
 
 DEFAULT_STEP_TIMEOUT = 15.0
@@ -196,12 +207,12 @@ _LOCAL_PROBE_JS = """(() => {
 def _probe_source() -> tuple[str, str]:
 	"""JS пробы. Предпочитаем серверную — одна логика на запись и на повтор."""
 	try:
-		server = importlib.import_module('bu_mcp.server')
-		js = getattr(server, '_DELTA_PROBE_JS', None)
+		shared = importlib.import_module('bu_mcp.server_shared')
+		js = getattr(shared, 'DELTA_PROBE_JS', None)
 		if isinstance(js, str) and js.strip():
 			return js, 'server'
 	except Exception as exc:
-		logger.debug('macro: bu_mcp.server unavailable, using the local probe: %r', exc)
+		logger.debug('macro: bu_mcp.server_shared unavailable, using the local probe: %r', exc)
 	return _LOCAL_PROBE_JS, 'local'
 
 
@@ -2111,6 +2122,272 @@ document.getElementById('add').addEventListener('click', function () {
 		return 1 if failures else 0
 
 	return asyncio.run(main())
+
+
+# --------------------------------------------------------------------------- #
+# Инструменты macro_save / macro_record / macro_list / macro_run
+# --------------------------------------------------------------------------- #
+#
+# Перенесено из bu_mcp.server при разбиении на подмодули (docs/WORKLOG.md).
+# Раньше это были методы BuMcpServer.
+
+
+def macro_dir() -> Path:
+	"""Каталог макросов. Источник правды — ``bu_mcp.journal``, а не сервер.
+
+	Путь зафиксирован в JOURNAL_CONTRACT.md (``~/.config/bu-mcp/macros/``), но
+	считает его ``journal.home()``, и он же честно смотрит на ``BU_MCP_HOME``.
+	Второй вычислитель того же пути — это ровно тот баг, который проявится
+	один раз и в самый неудобный момент, поэтому здесь только запасной
+	вариант на случай, если модуля ещё нет.
+	"""
+	try:
+		journal_mod = importlib.import_module('bu_mcp.journal')
+		return Path(journal_mod.home()) / 'macros'
+	except Exception:
+		return BU_MCP_HOME / 'macros'
+
+
+def validate_macro_name(raw: Any) -> str:
+	"""Проверить имя макроса белым списком. Не подошло — ``ToolError``, не санитайзинг."""
+	name = str(raw or '').strip()
+	if not MACRO_NAME_RE.match(name):
+		raise ToolError(
+			f'Bad macro name {name!r}. Allowed: 1-64 characters, letters/digits/dot/dash/underscore, '
+			f'starting with a letter or a digit. The name becomes a file name, so anything else '
+			f'(slashes, "..", empty) is REFUSED rather than quietly rewritten into something else.'
+		)
+	return name
+
+
+def macro_file_path(name: str) -> Path:
+	"""Файл макроса. Имя уже проверено ``validate_macro_name``, здесь только путь."""
+	try:
+		journal_mod = importlib.import_module('bu_mcp.journal')
+		return Path(journal_mod.macro_path(name))
+	except Exception:
+		return macro_dir() / f'{name}.json'
+
+
+def resolve_values(macro: dict[str, Any], overrides: dict[str, Any] | None) -> dict[str, Any]:
+	"""Итоговые значения переменных: ровно те, с которыми ``run`` пойдёт по шагам.
+
+	Считает их ``_resolve_vars`` — та самая функция, которую через секунду
+	вызовет ``run``. Второй вычислитель тех же значений означал бы гейт,
+	проверяющий не тот макрос, который исполнится: достаточно разойтись в
+	одном правиле приоритета (override поверх значения из файла), и проверка
+	становится декоративной.
+	"""
+	values, _missing = _resolve_vars(macro, overrides)
+	return values
+
+
+def urls_for_gate(macro: Any, values: dict[str, Any] | None = None) -> list[tuple[str, str]]:
+	"""Куда макрос ПОЙДЁТ, с подстановкой переменных. ``[(url, где это записано)]``.
+
+	Проверять надо итоговые адреса, а не записанные в файл. Точка входа
+	вынесена ``to_macro`` в переменную ``start_url`` именно для того, чтобы её
+	подменяли при вызове — значит ``macro_run(vars={'start_url': ...})`` уводит
+	сценарий на произвольный домен, и гейт, читающий литерал из файла, этого
+	не увидит. Поэтому ``params`` каждого шага сначала материализуются теми же
+	значениями, что получит ``run``, и только потом обходятся.
+
+	Что попадает в проверку:
+
+	* ``params`` после подстановки — это адрес, по которому шаг физически
+	  пойдёт (``browser_navigate``);
+	* ``step['url']`` — записанный литерал, но ТОЛЬКО как запасной вариант,
+	  когда переменная не разрешилась: тогда неизвестно, куда шаг пойдёт, и
+	  честнее проверить хотя бы записанное (``run`` на такой переменной
+	  всё равно остановится на предусловии);
+	* ``expect.url_after`` — адрес, на который действие увело при записи. Это
+	  следующая страница сценария: клик по ссылке на чужой домен уводит
+	  браузер туда же, куда увела бы навигация, только гейт про неё не знает,
+	  потому что дальше шаги идут уже мимо ``_check_domain_gate``.
+
+	Что НЕ попадает — и почему это не ослабление:
+
+	* ``hint['url']`` (и ``recorded_on``) — адрес страницы, на которой элемент
+	  БЫЛ ВИДЕН при записи. Это наблюдение прошлого, а не цель: повтор по
+	  нему никуда не идёт. Более того, ``resolve`` гардит несовпадение URL, а
+	  сам ``macro_run`` уже проверен ``_check_domain_gate`` по ТЕКУЩЕЙ
+	  странице, так что оказаться на запрещённом домене можно только через
+	  навигацию, а она проверяется. Зато цена гейта по хендлу вполне
+	  реальная: хендл, снятый на ``about:blank`` (пустая вкладка, куда
+	  сценарий сам же и навигируется первым шагом), не совпадает ни с одной
+	  маской и отклонял бы совершенно законный макрос при любом непустом
+	  allowlist.
+	"""
+	values = values or {}
+	unresolved = object()
+	found: list[tuple[str, str]] = []
+
+	def materialize(node: Any) -> Any:
+		"""Подстановка переменных. Неразрешённая -> сентинел (не строка, обход её не заметит)."""
+		if isinstance(node, dict):
+			if set(node) == {'$var'}:
+				return values.get(str(node['$var']), unresolved)
+			return {k: materialize(v) for k, v in node.items()}
+		if isinstance(node, list):
+			return [materialize(v) for v in node]
+		return node
+
+	def walk(node: Any, where: str, out: list[tuple[str, str]]) -> None:
+		if isinstance(node, dict):
+			for key, value in node.items():
+				if key == 'url' and isinstance(value, str) and value.strip():
+					out.append((value, where))
+				else:
+					walk(value, where, out)
+		elif isinstance(node, list):
+			for value in node:
+				walk(value, where, out)
+
+	steps = (macro or {}).get('steps')
+	steps_list = [s for s in (steps if isinstance(steps, list) else []) if isinstance(s, dict)]
+	# Автостарт (run, предусловие 4): если первый шаг — не навигация, а
+	# браузер стоит не там, повтор сам откроет страницу, где шаг записан.
+	# Это тоже адрес, куда макрос ПОЙДЁТ, и гейт обязан его видеть.
+	if steps_list and str(steps_list[0].get('tool') or '') not in ('browser_navigate', 'navigate'):
+		start_url = steps_list[0].get('url_before')
+		if isinstance(start_url, str) and start_url.strip():
+			found.append((start_url, 'auto-start: the page the first step was recorded on'))
+	for i, step in enumerate(steps_list, start=1):
+		label = f'step {step.get("n") or i} (`{step.get("tool") or "?"}`)'
+		from_params: list[tuple[str, str]] = []
+		walk(materialize(step.get('params')), f'{label} goes to', from_params)
+		if not from_params:
+			literal = step.get('url')
+			if isinstance(literal, str) and literal.strip():
+				from_params.append((literal, f'{label} goes to (recorded value: the variable did not resolve)'))
+		found.extend(from_params)
+
+		expect = step.get('expect')
+		if isinstance(expect, dict):
+			after = expect.get('url_after')
+			if isinstance(after, str) and after.strip():
+				found.append((after, f'{label} led to this URL when recorded'))
+	return found
+
+
+def build_and_save(
+	journal_mod: Any,
+	name: str,
+	picked: list[dict[str, Any]],
+	*,
+	replace_from: int | None = None,
+	selected_by: str,
+) -> dict[str, Any]:
+	"""Общий хвост ``macro_save`` и ``macro_record stop``: собрать, склеить, записать."""
+	if not picked:
+		raise ToolError(
+			f'Nothing to save ({selected_by}). Perform the actions first (they are recorded '
+			f'automatically), check them with journal_list, then save.'
+		)
+	try:
+		macro = journal_mod.to_macro(picked, name=name)
+	except Exception as exc:
+		raise ToolError(f'journal.to_macro failed: {type(exc).__name__}: {exc}') from exc
+	if not isinstance(macro, dict):
+		raise ToolError(f'journal.to_macro returned {type(macro).__name__}, expected a macro dict.')
+
+	if not (macro.get('steps') or []):
+		raise ToolError(
+			f'journal.to_macro produced a macro with no steps out of {len(picked)} journal entr(ies) '
+			f'({selected_by}). Observations are dropped on purpose; the entries must include actions that '
+			f'change state (browser_click / browser_type / browser_hover / browser_navigate / select_dropdown / '
+			f'send_keys / scroll) or checkpoints.'
+		)
+
+	merged_from: dict[str, Any] | None = None
+	if replace_from is not None:
+		at = int(replace_from)
+		if at < 1:
+			raise ToolError(f'replace_from must be >= 1, got {at}.')
+		base_path = macro_file_path(name)
+		if not base_path.exists():
+			raise ToolError(
+				f'replace_from={at} asks to repair macro {name!r}, but no such macro is saved. '
+				f'Save it without replace_from first.'
+			)
+		try:
+			base = json.loads(base_path.read_text(encoding='utf-8'))
+		except Exception as exc:
+			raise ToolError(f'Macro {name!r} at {base_path} is not readable JSON: {type(exc).__name__}: {exc}') from exc
+		base_steps = base.get('steps') or []
+		if at > len(base_steps) + 1:
+			raise ToolError(
+				f'replace_from={at} is past the end of macro {name!r}, which has {len(base_steps)} step(s). '
+				f'Use replace_from={len(base_steps) + 1} to append.'
+			)
+		try:
+			macro = journal_mod.merge_macro(base, macro, at=at)
+		except Exception as exc:
+			raise ToolError(f'journal.merge_macro failed: {type(exc).__name__}: {exc}') from exc
+		merged_from = {'kept': at - 1, 'base_steps': len(base_steps)}
+
+	try:
+		path = Path(journal_mod.save_macro(macro))
+	except Exception as exc:
+		raise ToolError(f'Cannot write macro {name!r}: {type(exc).__name__}: {exc}') from exc
+
+	steps = macro.get('steps') or []
+	tools = [s.get('tool') for s in steps if isinstance(s, dict)]
+	checkpoints = sum(1 for t in tools if t == 'checkpoint')
+	action = (
+		f'Saved macro {name!r}: {len(steps)} step(s)'
+		+ (f' ({checkpoints} checkpoint(s))' if checkpoints else '')
+		+ (f', steps 1..{merged_from["kept"]} kept from the previous version' if merged_from else '')
+		+ f' out of {len(picked)} journal entr(ies) ({selected_by}). '
+		f'Run it with macro_run(name="{name}") or from a shell: python -m bu_mcp.macro run {name}'
+	)
+	payload: dict[str, Any] = {
+		'action': action,
+		'name': name,
+		'file': str(path),
+		'steps': len(steps),
+		'tools': tools,
+		'vars': macro.get('vars') or {},
+	}
+	if macro.get('issues'):
+		payload['issues'] = macro['issues']
+	if macro.get('incomplete'):
+		payload['incomplete'] = True
+	if merged_from:
+		payload['repaired'] = merged_from
+	return payload
+
+
+def pick_journal_entries(
+	journal_mod: Any, entries: list[dict[str, Any]], args: dict[str, Any], *, name: str | None
+) -> tuple[list[dict[str, Any]], str]:
+	"""Какие записи идут в макрос: ``include`` -> ``limit`` -> запись start/stop -> последние 20."""
+	include = args.get('include')
+	if include:
+		picked = []
+		for raw in include:
+			i = int(raw)
+			if not 0 <= i < len(entries):
+				raise ToolError(
+					f'Journal entry {i} does not exist: the journal holds {len(entries)} entr(ies) '
+					f'(valid positions 0..{max(0, len(entries) - 1)}). Call journal_list first and '
+					f'use the `i` values it prints.'
+				)
+			picked.append(entries[i])
+		return picked, f'{len(picked)} entries picked by position'
+	if args.get('limit'):
+		n = max(1, int(args['limit']))
+		return entries[-n:], f'the last {n} journal entries'
+	try:
+		found = journal_mod.span(entries, name=name) if hasattr(journal_mod, 'span') else None
+	except Exception as exc:
+		logger.warning('journal.span failed: %r', exc)
+		found = None
+	if found:
+		positions, info = found
+		state = 'still open' if info.get('open') else 'closed'
+		return [entries[i] for i in positions], f'recording {info.get("name")!r}, {state}'
+	return entries[-20:], 'the last 20 journal entries (no recording was started)'
 
 
 if __name__ == '__main__':
