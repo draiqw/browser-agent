@@ -2,9 +2,13 @@
 
 Это форк [browser-use/browser-use](https://github.com/browser-use/browser-use) (MIT,
 © Gregor Zunic) с надстройкой `bu_mcp/` — своим MCP-сервером поверх библиотеки.
-Код самого browser-use не изменён ни строкой: слой работает над его публичными
-интерфейсами (`Tools()`, `BrowserSession`, DOM-сериализатор), поэтому апстрим
-обновляется без разрешения конфликтов.
+Слой работает над публичными интерфейсами browser-use (`Tools()`, `BrowserSession`,
+DOM-сериализатор), не форкая их логику. Точечно тронуты 5 файлов самой библиотеки
+(`browser_use/actor/page.py`, `browser_use/browser/profile.py`, `session.py`,
+`session_manager.py`, `watchdogs/screenshot_watchdog.py`) — фиксы фокуса и
+скриншотов для фоновых вкладок со скрытым окном, подробности в
+[`docs/WORKLOG.md`](docs/WORKLOG.md). Это может конфликтовать при обновлении
+апстрима, в отличие от остального слоя.
 
 **Зачем.** Штатный MCP-сервер отдаёт клиенту 5 страничных примитивов и плоский JSON
 состояния. Разбор кода и бенчмарк на 16 живых сайтах вскрыли ряд проблем, которые
@@ -12,7 +16,7 @@
 
 | | оригинал | этот форк |
 |---|---|---|
-| инструментов наружу | 5 | **20**, динамическим мостом к реестру `Tools()` |
+| инструментов наружу | 5 | **27** (13 своих + динамический мост к реестру `Tools()`) |
 | формат состояния | плоский JSON `{index, tag, text}` | дерево с иерархией, `role`, `aria-*`, shadow-маркерами |
 | стоимость наблюдения | базовая | **0.76x** по корпусу, при том же числе элементов |
 | латентность состояния | базовая | **0.52x** — не снимает и не выбрасывает скриншот |
@@ -23,17 +27,32 @@
 | `hover` | действия нет в реестре | `browser_hover` через движение мыши CDP |
 | последствия действия | не сообщаются | дельта URL/вкладок/элементов, флаг `no_effect` |
 | `data:`/`blob:`/`file:` мимо allowlist | проходят ([#4763](https://github.com/browser-use/browser-use/issues/4763), [#5099](https://github.com/browser-use/browser-use/issues/5099)) | блокируются, deny by default |
+| повторяемые сценарии | нет | журнал действий + `macro_record`/`macro_run`: обучение один раз, повтор без модели, чинится с шага N |
+| загрузка файлов | нет | `upload_file` из папки вложений, allowlist по инструментам |
+| фоновая вкладка (окно скрыто) | не принимает ввод | сторож фокуса эмуляцией, ввод проходит |
 
-Подробности, замеры и известные ограничения — [`BU_MCP.md`](BU_MCP.md).
-Методика и полные результаты бенчмарка — [`bu_mcp/BENCH.md`](bu_mcp/BENCH.md),
+Подробности, замеры и известные ограничения — [`docs/BU_MCP.md`](docs/BU_MCP.md).
+Методика и полные результаты бенчмарка — [`docs/BENCH.md`](docs/BENCH.md),
 сырые данные в `bu_mcp/bench_results.json`. Что менялось и почему, с проверками
-и тупиками — [`bu_mcp/WORKLOG.md`](bu_mcp/WORKLOG.md).
+и тупиками — [`docs/WORKLOG.md`](docs/WORKLOG.md).
 
 ```bash
 scripts/chrome-automation.sh          # Chrome с CDP на 9222, окно скрыто
-PYTHONPATH=. python -m bu_mcp.server  # MCP-сервер, транспорт stdio
-PYTHONPATH=. python bu_mcp/smoke.py   # 165 проверок на живом браузере
+scripts/chrome-automation.sh login    # показать окно, чтобы залогиниться руками
+scripts/chrome-automation.sh status   # что работает и в каком режиме
+scripts/chrome-automation.sh list     # все профили: порт, состояние, каталог
+PYTHONPATH=. python -m bu_mcp.server        # MCP-сервер, транспорт stdio
+PYTHONPATH=. python bu_mcp/smoke.py         # проверки на живом браузере
+PYTHONPATH=. python -m bu_mcp.macro run ИМЯ # повтор макроса без модели
 ```
+
+Полный список подкоманд `chrome-automation.sh` (`show`/`hide`/`install`/`stop`)
+и деталей запуска — в [`docs/BU_MCP.md`](docs/BU_MCP.md#запуск).
+
+**Известная проблема.** На этой машине полный прогон `smoke.py` не всегда
+доходит до конца: `browser_screenshot` может упереться в таймаут CDP, если
+Chrome-автоматизация подвисает посреди прогона. Причина не найдена, см.
+[`docs/WORKLOG.md`](docs/WORKLOG.md#открытая-проблема).
 
 **Что НЕ проверено:** что агент с этим слоем решает реальные задачи лучше или
 дешевле. Все измерения сделаны без модели в цикле и характеризуют сервер, а не
@@ -120,18 +139,6 @@ https://github.com/user-attachments/assets/485fd3ec-61b9-4afc-9e86-ee9b85acb592
 
 <br/>
 
-# Quickstart
-
-If you want to use Browser Use in your agent (Claude Code, Codex, Cursor, Hermes, OpenClaw, etc.), paste this prompt, and it sets everything up itself:
-
-```text
-Install or upgrade browser-use to the latest stable version with uv using Python 3.12, run `browser-use skill install` to register the skill, and connect it to my browser. If setup or connection fails, follow https://github.com/browser-use/browser-harness/blob/main/install.md.
-```
-
-Then tell your agent what you want done.
-
-<br/>
-
 # Python library: the easiest way to automate the web
 
 Want to automate the web at scale, from your own code, and with any LLM? Use the Python library:
@@ -179,12 +186,6 @@ Check out the [library docs](https://docs.browser-use.com/open-source/introducti
 
 # Open Source vs Cloud
 
-<picture>
-  <source media="(prefers-color-scheme: light)" srcset="static/accuracy_by_model_light.png">
-  <source media="(prefers-color-scheme: dark)" srcset="static/accuracy_by_model_dark.png">
-  <img alt="BU Bench V1 - LLM Success Rates" src="static/accuracy_by_model_light.png" width="100%">
-</picture>
-
 We benchmark Browser Use across 100 real-world browser tasks. Full benchmark is open source: **[browser-use/benchmark](https://github.com/browser-use/benchmark)**.
 
 Browser Use is also **#1 on the [Odysseys leaderboard](https://odysseysbench.com/leaderboard)** with an 87.4% average, ahead of computer-use agents from OpenAI, Anthropic, Google, and Microsoft. Odysseys measures the agent's performance on 200 long-horizon web tasks.
@@ -211,27 +212,9 @@ curl -X POST https://api.browser-use.com/api/v4/runs \
 
 <br/>
 
-## Integrations, hosting, custom tools, MCP, and more on our [Docs ↗](https://docs.browser-use.com)
-
 <br/>
 
 # FAQ
-
-<details>
-<summary><b>Should I use the CLI vs. the Python library?</b></summary>
-
-**Use the CLI** if you already have an agent (Claude Code, Codex, Cursor, Hermes, OpenClaw, etc.) that you want to complete browser tasks for you. The agent installs the skill once (see [Quickstart](#quickstart)) and can then control the browser. Examples:
-- "Upload this video to YouTube"
-- "Compare these three laptops and give me a table with prices"
-- "Fill in this job application with my resume"
-
-**Use the Python library** when you are building software that automates the web. Examples:
-- Run many tasks on a schedule or in parallel (scraping, monitoring, QA)
-- Embed a browser agent into your own product
-- Custom tools, custom system prompts, structured output, fine-grained browser control
-
-Rule of thumb: one-off tasks through an agent → CLI. Repeatable automation in code → Python library.
-</details>
 
 <details>
 <summary><b>What's the best model to use?</b></summary>
