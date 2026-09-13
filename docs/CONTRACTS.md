@@ -5,14 +5,14 @@ Chrome для автоматизации поднят headless на `http://127.
 (если не отвечает — `~/bu-lab/chrome-automation.sh`).
 Репозиторий `~/browser-use` — только чтение, не менять.
 
-## bu_mcp/state.py
+## browser_use/mcp/state.py
     async def serialize_state(session, *, max_chars: int = 40000) -> dict
 
 `session` — живой `browser_use.browser.BrowserSession`.
 Возвращает dict: `url`, `title`, `tabs`, `viewport`, `scroll`, `tree` (str), `truncated` (bool).
 `tree` — компактное текстовое дерево, НЕ плоский JSON.
 
-## bu_mcp/waiting.py
+## browser_use/mcp/waiting.py
     async def wait_for_page_ready(session, *, timeout: float = 8.0) -> dict
     async def navigation_baseline(session) -> dict
     async def wait_after_navigation(session, *, timeout: float = 10.0, baseline: dict | None = None) -> dict
@@ -26,7 +26,7 @@ Chrome для автоматизации поднят headless на `http://127.
 baseline снимается уже после действия, то есть с нового документа, и смены `loaderId`
 не видно вовсе. `wait_after_navigation` возвращает то же плюс `navigated: bool`, `url`.
 
-## bu_mcp/server.py (контракт по проводу)
+## browser_use/mcp/server.py (контракт по проводу)
 
 `browser_navigate` -> один текстовый блок, компактный JSON:
 `{'action', 'url', 'waiting': {'ready', 'navigated', 'hydrated', 'elapsed', 'stages': [...]}}`.
@@ -128,9 +128,9 @@ CLI и штатном MCP-сервере.
 `viewport=None`, `no_viewport=True`: чужой вьюпорт мы не трогаем. Для ветки
 запуска viewport остаётся штатным.
 
-### Папка скачанного (bu_mcp/downloads.py)
+### Папка скачанного (browser_use/mcp/downloads.py)
 
-    def download_dir() -> Path            # bu_mcp/downloads, или BU_MCP_DOWNLOAD_DIR
+    def download_dir() -> Path            # browser_use/mcp/downloads, или BU_MCP_DOWNLOAD_DIR
     def list_files() -> list[Path]        # свежие первыми, .crdownload не показываем
     def mark_baseline() -> None           # снимок ПЕРЕД действием
     def baseline() -> set[str]            # с чем сравнивать «что скачалось»
@@ -149,8 +149,8 @@ CLI и штатном MCP-сервере.
 их всё равно выкидывает `to_macro`. Единственное исключение — `checkpoint`:
 это заявленное агентом условие («ответ на странице»), при повторе — шаг-проверка.
 
-Загрузка файлов (`upload_file`, серверный обработчик, `bu_mcp/uploads.py`):
-приложить можно только файл из папки вложений (`bu_mcp/uploads/`, перекрывается
+Загрузка файлов (`upload_file`, серверный обработчик, `browser_use/mcp/uploads.py`):
+приложить можно только файл из папки вложений (`browser_use/mcp/uploads/`, перекрывается
 `BU_MCP_UPLOAD_DIR`) — граница `uploads.resolve` отклоняет выход за папку,
 пустой и отсутствующий файл. Реестровое `upload_file` получает allowlist ровно
 из этого пути; файл ставится в `<input type=file>` через `setFileInputFiles`.
@@ -211,7 +211,7 @@ allowlist по всем URL, зашитым в его шаги (`_macro_urls`): 
 `macro.py` напрямую, мимо `_check_domain_gate`, и без этой проверки сохранённый
 `navigate` был бы дырой в доменной политике.
 
-## bu_mcp/resolve.py
+## browser_use/mcp/resolve.py
     class StaleHandleError(Exception): ...
     async def resolve_index(session, index: int)
 

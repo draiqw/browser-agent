@@ -12,8 +12,7 @@ from typing import Any
 
 import mcp.types as types
 
-from browser_use.tools.registry.views import ActionRegistry
-from bu_mcp.server_shared import (
+from browser_use.mcp.server_shared import (
 	BRIDGE_EXCLUDE,
 	DELTA_FOCUS_COUNTS,
 	DOMAIN_EXEMPT,
@@ -23,8 +22,9 @@ from bu_mcp.server_shared import (
 	ToolError,
 	bu_mcp_module,
 )
+from browser_use.tools.registry.views import ActionRegistry
 
-logger = logging.getLogger('bu_mcp.server')
+logger = logging.getLogger('browser_use.mcp.server')
 
 
 class RegistryBridgeMixin:

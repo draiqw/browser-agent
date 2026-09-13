@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 from browser_use.browser import BrowserSession
-from bu_mcp.server_shared import (
+from browser_use.mcp.server_shared import (
 	DELTA_INFORMATIONAL,
 	DELTA_PROBE_JS,
 	DELTA_RECHECK_DELAY,

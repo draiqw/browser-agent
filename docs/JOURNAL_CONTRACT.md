@@ -12,7 +12,7 @@ accessible name, и `describe_handle` возвращает составной х
 Хранилище: `~/.config/bu-mcp/journals/` (JSONL, по файлу на сессию),
 макросы — `~/.config/bu-mcp/macros/<name>.json`.
 
-## bu_mcp/journal.py
+## browser_use/mcp/journal.py
 
     def record(entry: dict) -> int | None   # seq записи, None если не записалось
     def current_path() -> Path
@@ -28,7 +28,7 @@ accessible name, и `describe_handle` возвращает составной х
 `browser_screenshot`, `find_elements`), оставляет шаги, меняющие состояние,
 и параметризует введённый текст в именованные переменные.
 
-## bu_mcp/macro.py
+## browser_use/mcp/macro.py
 
     class StepFailed(Exception): ...
     async def run(session, macro: dict, *, vars: dict | None = None,
@@ -57,16 +57,16 @@ accessible name, и `describe_handle` возвращает составной х
 
 Загрузка файла (`tool: 'upload_file'`) журналируется как элементное действие с
 хендлом `<input type=file>`; `params.file` — имя внутри папки вложений
-(`bu_mcp.uploads`), которое `to_macro` выносит в переменную `attachment`, а
+(`browser_use.mcp.uploads`), которое `to_macro` выносит в переменную `attachment`, а
 `macro.run` резолвит обратно в абсолютный путь внутри папки (allowlist из
 одного пути).
 
 MCP: `macro_record(action=start|stop|status, name, save, replace_from)`,
 `checkpoint(text, not_text, url, download, timeout, note)`, `macro_save(..., replace_from)`,
 `macro_run(..., from_step, new_tab)`. CLI без сервера и модели:
-`python -m bu_mcp.macro run NAME [--var k=v] [--from N] [--no-strict] [--json]`.
+`python -m browser_use.mcp.macro run NAME [--var k=v] [--from N] [--no-strict] [--json]`.
 
-Скачанное складывается в `bu_mcp/downloads/` (`BU_MCP_DOWNLOAD_DIR`). Условие
+Скачанное складывается в `browser_use/mcp/downloads/` (`BU_MCP_DOWNLOAD_DIR`). Условие
 `checkpoint(download=true|".png")` сверяет папку с её состоянием ПЕРЕД действием
 (`downloads.mark_baseline()` зовётся на каждое действие и на сервере, и в
 `macro._act`): загрузка успевает закончиться раньше, чем стартует проверка, и

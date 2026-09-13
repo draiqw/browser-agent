@@ -13,10 +13,10 @@ from typing import Any
 
 from browser_use.browser import BrowserProfile, BrowserSession
 from browser_use.filesystem.file_system import FileSystem
+from browser_use.mcp.server_shared import ToolError, bu_mcp_module, cdp_reachable
 from browser_use.tools.service import Tools
-from bu_mcp.server_shared import ToolError, bu_mcp_module, cdp_reachable
 
-logger = logging.getLogger('bu_mcp.server')
+logger = logging.getLogger('browser_use.mcp.server')
 
 
 class CdpSessionMixin:

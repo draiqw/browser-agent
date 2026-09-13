@@ -78,7 +78,7 @@ async def main() -> int:
 	contract_checks()
 	params = StdioServerParameters(
 		command=sys.executable,
-		args=['-m', 'bu_mcp.server'],
+		args=['-m', 'browser_use.mcp.server'],
 		env={**os.environ, 'PYTHONPATH': str(ROOT), 'PYTHONUNBUFFERED': '1'},
 		cwd=str(ROOT),
 	)
@@ -363,9 +363,9 @@ def contract_checks() -> None:
 	"""
 	print('\n[10] contract: ActionResult / new-tab / scroll (pure)')
 	try:
-		from bu_mcp.server import BuMcpServer, ToolError
+		from browser_use.mcp.server import BuMcpServer, ToolError
 	except Exception as exc:
-		bad('bu_mcp.server imports for contract checks', f'{type(exc).__name__}: {exc}')
+		bad('browser_use.mcp.server imports for contract checks', f'{type(exc).__name__}: {exc}')
 		return
 
 	# -- таблица текстов-нооп ------------------------------------------------
@@ -480,8 +480,8 @@ def upload_contract_checks() -> None:
 	import os
 	import tempfile
 
-	from bu_mcp import journal as journal_mod
-	from bu_mcp import uploads
+	from browser_use.mcp import journal as journal_mod
+	from browser_use.mcp import uploads
 
 	saved = os.environ.get('BU_MCP_UPLOAD_DIR')
 	updir = tempfile.mkdtemp(prefix='bu-upload-smoke-')
@@ -567,7 +567,7 @@ def replay_tolerance_checks() -> None:
 	повтор на верном действии.
 	"""
 	print('\n[10e] contract: replay tolerates dynamic URLs and interchangeable input controls (pure)')
-	from bu_mcp.macro import _same_page
+	from browser_use.mcp.macro import _same_page
 
 	cases = [
 		(
@@ -594,7 +594,7 @@ def replay_tolerance_checks() -> None:
 		bad('_same_page: id-сегменты пути терпит, осмысленные и кросс-доменные различия ловит', str(bad_cases)[:240])
 
 	# same_control_class: textarea <-> contenteditable-div — один класс, div<->button — нет.
-	from bu_mcp import resolve as resolve_mod
+	from browser_use.mcp import resolve as resolve_mod
 
 	class _Ax:
 		def __init__(self, role=None, name=None):
@@ -722,8 +722,8 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 	print('\n[10c] contract: journal envelope / failure isolation / macro names (pure)')
 	import types as _types
 
-	journal_mod_ = importlib.import_module('bu_mcp.journal')
-	macro_mod_ = importlib.import_module('bu_mcp.macro')
+	journal_mod_ = importlib.import_module('browser_use.mcp.journal')
+	macro_mod_ = importlib.import_module('browser_use.mcp.macro')
 	# Перенесено из BuMcpServer в bu_mcp.journal / bu_mcp.macro при разбиении
 	# server.py на подмодули (docs/WORKLOG.md) — ровно те же функции, другой дом.
 	open_ = getattr(journal_mod_, 'open_entry', None)
@@ -817,14 +817,14 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		bad('journal: outcome is ok / noop / error, and no_effect counts as noop', str(wrong)[:200])
 
 	# 4. Сломанный журнал НЕ ломает действие.
-	saved = sys.modules.get('bu_mcp.journal')
+	saved = sys.modules.get('browser_use.mcp.journal')
 	try:
 		captured: list = []
-		good = _types.ModuleType('bu_mcp.journal')
+		good = _types.ModuleType('browser_use.mcp.journal')
 		# ModuleType в стабах не объявляет 'record' -- модуль это просто namespace,
 		# и рантайм разрешает произвольные атрибуты; setattr обходит стаб честно
 		setattr(good, 'record', lambda e: captured.append(e))
-		sys.modules['bu_mcp.journal'] = good
+		sys.modules['browser_use.mcp.journal'] = good
 		e = open_('browser_type', {'index': 3, 'text': 'x'})
 		try:
 			write(e)
@@ -835,13 +835,13 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 		else:
 			bad('journal: a normal action is handed to journal.record with its own measured cost', str(captured)[:200])
 
-		broken = _types.ModuleType('bu_mcp.journal')
+		broken = _types.ModuleType('browser_use.mcp.journal')
 
 		def _boom(_entry):
 			raise RuntimeError('journal disk on fire')
 
 		setattr(broken, 'record', _boom)
-		sys.modules['bu_mcp.journal'] = broken
+		sys.modules['browser_use.mcp.journal'] = broken
 		try:
 			write(open_('browser_click', {'index': 1}))
 		except Exception as exc:
@@ -851,7 +851,7 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 
 		# None -- специальный сигнал importlib "модуль не найден" (см. доку import
 		# system); стаб sys.modules этого не знает, отсюда обоснованный ignore
-		sys.modules['bu_mcp.journal'] = None  # pyright: ignore[reportArgumentType] — importlib -> ImportError
+		sys.modules['browser_use.mcp.journal'] = None  # pyright: ignore[reportArgumentType] — importlib -> ImportError
 		try:
 			write(open_('browser_click', {'index': 1}))
 		except Exception as exc:
@@ -860,9 +860,9 @@ def journal_contract_checks(BuMcpServer, ToolError) -> None:
 			ok('journal: a missing journal module does not break the action')
 	finally:
 		if saved is None:
-			sys.modules.pop('bu_mcp.journal', None)
+			sys.modules.pop('browser_use.mcp.journal', None)
 		else:
-			sys.modules['bu_mcp.journal'] = saved
+			sys.modules['browser_use.mcp.journal'] = saved
 
 	# 5. Имя макроса едет в путь файла -> белый список, отказ вместо санитайзинга.
 	refused = []
@@ -2078,7 +2078,7 @@ GATE_MACRO = {
 
 def write_gate_macro() -> Path:
 	"""Положить GATE_MACRO туда, откуда его читает сервер (``journal.macro_path``)."""
-	from bu_mcp import journal as journal_mod
+	from browser_use.mcp import journal as journal_mod
 
 	path = Path(journal_mod.macro_path(GATE_MACRO_NAME))
 	path.parent.mkdir(parents=True, exist_ok=True)
@@ -2101,7 +2101,7 @@ async def allowlist_check() -> None:
 	print('\n[9] BU_MCP_ALLOWED_DOMAINS=example.com (separate server process)')
 	params = StdioServerParameters(
 		command=sys.executable,
-		args=['-m', 'bu_mcp.server'],
+		args=['-m', 'browser_use.mcp.server'],
 		env={**os.environ, 'PYTHONPATH': str(ROOT), 'PYTHONUNBUFFERED': '1', 'BU_MCP_ALLOWED_DOMAINS': 'example.com'},
 		cwd=str(ROOT),
 	)

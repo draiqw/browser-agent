@@ -50,7 +50,7 @@ import time
 from pathlib import Path
 from typing import Any, cast
 
-from bu_mcp.server_shared import BU_MCP_HOME, MACRO_NAME_RE, ToolError
+from browser_use.mcp.server_shared import BU_MCP_HOME, MACRO_NAME_RE, ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -154,7 +154,7 @@ class StepFailed(Exception):
 # Проба страницы
 # --------------------------------------------------------------------------- #
 
-#: Запасная проба на случай, если ``bu_mcp.server`` не импортируется (его правят
+#: Запасная проба на случай, если ``browser_use.mcp.server`` не импортируется (его правят
 #: параллельно, и он тянет за собой mcp). Считает те же признаки, что и
 #: серверная, но короче: нам от неё нужен только БУЛЕВ ответ «изменилось ли
 #: что-нибудь», а не сопоставимые между прогонами числа.
@@ -207,12 +207,12 @@ _LOCAL_PROBE_JS = """(() => {
 def _probe_source() -> tuple[str, str]:
 	"""JS пробы. Предпочитаем серверную — одна логика на запись и на повтор."""
 	try:
-		shared = importlib.import_module('bu_mcp.server_shared')
+		shared = importlib.import_module('browser_use.mcp.server_shared')
 		js = getattr(shared, 'DELTA_PROBE_JS', None)
 		if isinstance(js, str) and js.strip():
 			return js, 'server'
 	except Exception as exc:
-		logger.debug('macro: bu_mcp.server_shared unavailable, using the local probe: %r', exc)
+		logger.debug('macro: browser_use.mcp.server_shared unavailable, using the local probe: %r', exc)
 	return _LOCAL_PROBE_JS, 'local'
 
 
@@ -420,7 +420,7 @@ async def checkpoint(
 	"""
 	spec = checkpoint_spec(params)
 	budget = spec['timeout'] if timeout is None else float(timeout)
-	downloads_mod = importlib.import_module('bu_mcp.downloads') if 'download' in spec else None
+	downloads_mod = importlib.import_module('browser_use.mcp.downloads') if 'download' in spec else None
 	before_files = downloads_mod.baseline() if downloads_mod else set()
 	started = time.monotonic()
 	deadline = started + budget
@@ -760,7 +760,7 @@ def _identity_mismatch(node: Any, hint: dict[str, Any], level: str | None = None
 		# Исключение — взаимозаменяемые поля ввода (textarea <-> contenteditable
 		# <-> input): сайт отдаёт один логический контрол разными тегами. Резолв
 		# такое допускает только по сильному якорю, поэтому здесь тоже.
-		resolve_mod = importlib.import_module('bu_mcp.resolve')
+		resolve_mod = importlib.import_module('browser_use.mcp.resolve')
 		if not resolve_mod.same_control_class(hint, node):
 			return f'expected <{tag}>, resolved to <{got_tag}>'
 
@@ -799,8 +799,8 @@ async def _resolve_step(
 	вовсе: неоднозначность сама не рассосётся, а ждать, пока один из двух
 	одинаковых элементов исчезнет, — это и есть угадывание.
 	"""
-	resolve_mod = importlib.import_module('bu_mcp.resolve')
-	waiting_mod = importlib.import_module('bu_mcp.waiting')
+	resolve_mod = importlib.import_module('browser_use.mcp.resolve')
+	waiting_mod = importlib.import_module('browser_use.mcp.waiting')
 	attempts = 0
 	last: Exception | None = None
 
@@ -902,7 +902,7 @@ def _result_text(name: str, result: Any) -> str:
 
 	marker = None
 	try:
-		server = importlib.import_module('bu_mcp.server')
+		server = importlib.import_module('browser_use.mcp.server')
 		marker = server.BuMcpServer._classify_noop(name, joined)
 	except Exception:
 		if _STALE_INDEX_RE.search(joined):
@@ -989,7 +989,7 @@ async def _act(session: Any, tool: str, params: dict[str, Any], node: Any, live_
 	try:
 		# Та же точка отсчёта, что и на записи: чекпоинт про скачивание сравнивает
 		# папку с тем, какой она была ПЕРЕД действием.
-		importlib.import_module('bu_mcp.downloads').mark_baseline()
+		importlib.import_module('browser_use.mcp.downloads').mark_baseline()
 	except Exception:
 		pass
 	name = _REGISTRY_ALIAS.get(tool, tool)
@@ -1015,7 +1015,7 @@ async def _act(session: Any, tool: str, params: dict[str, Any], node: Any, live_
 		# вложений, с тем же allowlist, что и у сервера. Резолв — единственное
 		# место, где имя проверяется на выход за папку; на другой машине путь
 		# другой, а имя то же.
-		uploads = importlib.import_module('bu_mcp.uploads')
+		uploads = importlib.import_module('browser_use.mcp.uploads')
 		fname = payload.pop('file', None) or payload.get('path')
 		try:
 			abs_path = uploads.resolve(str(fname))
@@ -1131,7 +1131,7 @@ async def run(
 		``0`` означает «упало на предусловии, до первого шага»; ``None`` —
 		не упало.
 	"""
-	waiting_mod = importlib.import_module('bu_mcp.waiting')
+	waiting_mod = importlib.import_module('browser_use.mcp.waiting')
 	started = time.perf_counter()
 	from_step = max(1, int(from_step or 1))
 	all_steps = [s for s in (macro.get('steps') or []) if isinstance(s, dict)]
@@ -1433,7 +1433,7 @@ async def _cli_run(args: Any) -> int:
 	from browser_use.browser.events import CloseTabEvent
 	from browser_use.browser.session import create_target_params
 
-	journal_mod = importlib.import_module('bu_mcp.journal')
+	journal_mod = importlib.import_module('browser_use.mcp.journal')
 	try:
 		macro = journal_mod.load_macro(args.name)
 	except FileNotFoundError:
@@ -1451,7 +1451,7 @@ async def _cli_run(args: Any) -> int:
 	url = cdp_url(args.cdp, profile=args.profile)
 	# Та же папка скачанного, что и у сервера: повтор без модели должен класть
 	# результат туда же, куда клал обучающий прогон.
-	downloads_dir = str(importlib.import_module('bu_mcp.downloads').download_dir())
+	downloads_dir = str(importlib.import_module('browser_use.mcp.downloads').download_dir())
 	session = BrowserSession(browser_profile=BrowserProfile(cdp_url=url, is_local=True, downloads_path=downloads_dir))
 	try:
 		await session.start()
@@ -1531,7 +1531,7 @@ def _cli(argv: list[str]) -> int:
 	import json
 
 	parser = argparse.ArgumentParser(
-		prog='python -m bu_mcp.macro',
+		prog='python -m browser_use.mcp.macro',
 		description='Replay a recorded macro against the automation Chrome, no model in the loop.',
 	)
 	sub = parser.add_subparsers(dest='cmd', required=True)
@@ -1553,7 +1553,7 @@ def _cli(argv: list[str]) -> int:
 	sub.add_parser('selfcheck', help='live self-check against the automation Chrome')
 
 	args = parser.parse_args(argv)
-	journal_mod = importlib.import_module('bu_mcp.journal')
+	journal_mod = importlib.import_module('browser_use.mcp.journal')
 
 	if args.cmd == 'list':
 		names = journal_mod.list_macros()
@@ -1669,8 +1669,8 @@ document.getElementById('add').addEventListener('click', function () {
 	async def main() -> int:
 		from browser_use.browser import BrowserProfile, BrowserSession
 		from browser_use.browser.events import CloseTabEvent
-		from bu_mcp import journal as journal_mod
-		from bu_mcp import resolve as resolve_mod
+		from browser_use.mcp import journal as journal_mod
+		from browser_use.mcp import resolve as resolve_mod
 
 		failures = 0
 		os.environ['BU_MCP_HOME'] = tempfile.mkdtemp(prefix='bu-mcp-macro-')
@@ -1688,7 +1688,7 @@ document.getElementById('add').addEventListener('click', function () {
 		owns_tab = my_tab not in foreign
 		print(f'own tab:   {my_tab}  (наша: {owns_tab}, чужих вкладок: {len(foreign)})')
 
-		waiting_mod = importlib.import_module('bu_mcp.waiting')
+		waiting_mod = importlib.import_module('browser_use.mcp.waiting')
 
 		async def pin() -> None:
 			"""Прибить фокус к СВОЕЙ вкладке.
@@ -2133,7 +2133,7 @@ document.getElementById('add').addEventListener('click', function () {
 
 
 def macro_dir() -> Path:
-	"""Каталог макросов. Источник правды — ``bu_mcp.journal``, а не сервер.
+	"""Каталог макросов. Источник правды — ``browser_use.mcp.journal``, а не сервер.
 
 	Путь зафиксирован в JOURNAL_CONTRACT.md (``~/.config/bu-mcp/macros/``), но
 	считает его ``journal.home()``, и он же честно смотрит на ``BU_MCP_HOME``.
@@ -2142,7 +2142,7 @@ def macro_dir() -> Path:
 	вариант на случай, если модуля ещё нет.
 	"""
 	try:
-		journal_mod = importlib.import_module('bu_mcp.journal')
+		journal_mod = importlib.import_module('browser_use.mcp.journal')
 		return Path(journal_mod.home()) / 'macros'
 	except Exception:
 		return BU_MCP_HOME / 'macros'
@@ -2163,7 +2163,7 @@ def validate_macro_name(raw: Any) -> str:
 def macro_file_path(name: str) -> Path:
 	"""Файл макроса. Имя уже проверено ``validate_macro_name``, здесь только путь."""
 	try:
-		journal_mod = importlib.import_module('bu_mcp.journal')
+		journal_mod = importlib.import_module('browser_use.mcp.journal')
 		return Path(journal_mod.macro_path(name))
 	except Exception:
 		return macro_dir() / f'{name}.json'
@@ -2339,7 +2339,7 @@ def build_and_save(
 		+ (f' ({checkpoints} checkpoint(s))' if checkpoints else '')
 		+ (f', steps 1..{merged_from["kept"]} kept from the previous version' if merged_from else '')
 		+ f' out of {len(picked)} journal entr(ies) ({selected_by}). '
-		f'Run it with macro_run(name="{name}") or from a shell: python -m bu_mcp.macro run {name}'
+		f'Run it with macro_run(name="{name}") or from a shell: python -m browser_use.mcp.macro run {name}'
 	)
 	payload: dict[str, Any] = {
 		'action': action,

@@ -412,7 +412,7 @@ def check_noop_markers() -> Check:
 	строка не ломает ничего громко — она просто перестаёт совпадать, и молчаливый
 	ложный успех возвращается.
 	"""
-	from bu_mcp.server import NOOP_MARKERS, BuMcpServer
+	from browser_use.mcp.server import NOOP_MARKERS, BuMcpServer
 
 	# (код маркера, действие, текст как его увидит клиент, куски исходника апстрима)
 	probes: dict[str, tuple[str, str, tuple[str, ...]]] = {
@@ -482,7 +482,7 @@ def check_new_tab_claim() -> Check:
 	Обе ветки `_detect_new_tab_opened` должны быть на месте: ложную мы правим по
 	фактическому target_id, честную не трогаем.
 	"""
-	from bu_mcp.server import NEW_TAB_CLAIM_RE, NEW_TAB_NOTE_RE
+	from browser_use.mcp.server import NEW_TAB_CLAIM_RE, NEW_TAB_NOTE_RE
 
 	src = _read('tools/service.py')
 	claim = 'Automatically switched to new tab (tab_id:' in src
@@ -504,8 +504,8 @@ def check_bridge_exclude() -> Check:
 	Исключение по имени — договор с апстримом: если действие переименуют,
 	исключение станет пустым, и наружу вылезет второй путь к клику мимо резолва.
 	"""
+	from browser_use.mcp.server import BRIDGE_EXCLUDE
 	from browser_use.tools.service import Tools
-	from bu_mcp.server import BRIDGE_EXCLUDE
 
 	actions = set(Tools().registry.registry.actions)
 	gone = sorted(BRIDGE_EXCLUDE - actions)

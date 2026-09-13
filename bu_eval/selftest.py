@@ -212,8 +212,8 @@ def t_mcp_tools() -> Check:
 	"""
 	import asyncio
 
+	from browser_use.mcp.bench import OURS, McpClient
 	from bu_eval.profiles import PROFILES
-	from bu_mcp.bench import OURS, McpClient
 
 	async def ask() -> list[str]:
 		client = McpClient(OURS)

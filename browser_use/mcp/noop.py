@@ -10,7 +10,7 @@ from typing import Any
 
 from browser_use.agent.views import ActionResult
 from browser_use.browser import BrowserSession
-from bu_mcp.server_shared import NOOP_MARKERS, NoopMarker, NoopResultError, ToolError
+from browser_use.mcp.server_shared import NOOP_MARKERS, NoopMarker, NoopResultError, ToolError
 
 
 class NoopMixin:

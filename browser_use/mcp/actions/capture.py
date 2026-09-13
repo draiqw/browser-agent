@@ -11,7 +11,7 @@ from typing import Any
 
 import mcp.types as types
 
-from bu_mcp.server_shared import DEFAULT_SCREENSHOT_MAX_DIM, DEFAULT_STATE_MAX_CHARS, ToolError, bu_mcp_module
+from browser_use.mcp.server_shared import DEFAULT_SCREENSHOT_MAX_DIM, DEFAULT_STATE_MAX_CHARS, ToolError, bu_mcp_module
 
 
 class CaptureActionsMixin:

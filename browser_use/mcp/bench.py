@@ -33,9 +33,9 @@ Safety rules baked in:
 
 Usage::
 
-    /Users/draiqws/browser-agent/.venv/bin/python -m bu_mcp.bench            # full run
-    ... -m bu_mcp.bench --repeats 1 --sites wikipedia,github               # quick
-    ... -m bu_mcp.bench --report-only                                      # re-render md
+    /Users/draiqws/browser-agent/.venv/bin/python -m browser_use.mcp.bench            # full run
+    ... -m browser_use.mcp.bench --repeats 1 --sites wikipedia,github               # quick
+    ... -m browser_use.mcp.bench --report-only                                      # re-render md
 """
 
 from __future__ import annotations
@@ -142,8 +142,8 @@ STOCK = ServerSpec(
 
 OURS = ServerSpec(
 	key='ours',
-	label='bu_mcp.server',
-	argv=[PYTHON, '-m', 'bu_mcp.server'],
+	label='browser_use.mcp.server',
+	argv=[PYTHON, '-m', 'browser_use.mcp.server'],
 	env={'PYTHONPATH': str(REPO), 'BU_MCP_CDP_URL': CDP_URL},
 	tool_state='browser_state',
 	tool_navigate='browser_navigate',
@@ -1074,7 +1074,7 @@ def build_report(results: dict[str, Any]) -> str:
 	A(f'Chrome: `{results.get("chrome", {}).get("Browser")}` headless, CDP `{results["cdp_url"]}`  ')
 	A(f'Python: `{results["python"]}`  ')
 	A(f'Repeats per site per server: {results["repeats"]} (median reported)  ')
-	A(f'Regenerate: `{results["python"]} -m bu_mcp.bench`')
+	A(f'Regenerate: `{results["python"]} -m browser_use.mcp.bench`')
 	A('')
 
 	# ---------------- methodology

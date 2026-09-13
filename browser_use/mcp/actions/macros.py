@@ -1,7 +1,7 @@
 """Журнал и макросы: тонкие обработчики MCP-инструментов. ``MacroToolsMixin``.
 
 Тяжёлая логика (сборка макроса, резолв переменных, вычисление адресов для
-доменного гейта) живёт в ``bu_mcp.journal`` и ``bu_mcp.macro`` — эти методы
+доменного гейта) живёт в ``browser_use.mcp.journal`` и ``browser_use.mcp.macro`` — эти методы
 только достают аргументы, зовут её и заворачивают ответ.
 
 Вынесено из server.py при разбиении на подмодули (docs/WORKLOG.md).
@@ -15,7 +15,7 @@ from typing import Any
 
 import mcp.types as types
 
-from bu_mcp.server_shared import ToolError, bu_mcp_module
+from browser_use.mcp.server_shared import ToolError, bu_mcp_module
 
 
 class MacroToolsMixin:

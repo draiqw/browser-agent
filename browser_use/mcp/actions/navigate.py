@@ -11,7 +11,7 @@ from typing import Any
 import mcp.types as types
 
 from browser_use.browser import BrowserSession
-from bu_mcp.server_shared import DEFAULT_HYDRATE_TIMEOUT, ToolError, bu_mcp_module
+from browser_use.mcp.server_shared import DEFAULT_HYDRATE_TIMEOUT, ToolError, bu_mcp_module
 
 
 class NavigateActionsMixin:

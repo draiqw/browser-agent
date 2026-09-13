@@ -7,6 +7,76 @@
 Контракты модулей — [`CONTRACTS.md`](CONTRACTS.md), журнал и макросы —
 [`JOURNAL_CONTRACT.md`](JOURNAL_CONTRACT.md), обзор слоя — [`BU_MCP.md`](BU_MCP.md).
 
+## 2026-09-13 — bu_mcp перенесён в browser_use/mcp/
+
+`bu_mcp/` физически переехал в `browser_use/mcp/`, заменив штатный MCP-сервер
+апстрима файлом на файл: `git rm browser_use/mcp/server.py` + `git mv
+bu_mcp/server.py browser_use/mcp/server.py`, остальные модули (`server_shared.py`,
+`domain_gate.py`, `cdp_session.py`, `registry_bridge.py`, `noop.py`, `delta.py`,
+`journal.py`, `macro.py`, `state.py`, `resolve.py`, `waiting.py`, `downloads.py`,
+`uploads.py`, `bench.py`, `bench_results.json`, `smoke.py`, `actions/`) — рядом,
+без префикса `bu_mcp.`. Папка `bu_mcp/` больше не существует. Раньше слой жил
+СНАРУЖИ библиотеки и её код не трогал вовсе; теперь `browser_use/mcp/server.py`
+и соседи в этой директории — наш код на месте апстримного, со всеми вытекающими
+последствиями для будущих обновлений апстрима (конфликт почти гарантирован
+именно в `browser_use/mcp/`, в отличие от `bu_eval/`/`scripts/`, которые
+остались снаружи).
+
+`browser_use/mcp/__init__.py`: ленивый экспорт `BrowserUseServer` заменён на
+`BuMcpServer` — других имён `BrowserUseServer` в кодовой базе не осталось.
+`browser_use/cli.py` править не пришлось: `_run_mcp_stdio_server('browser_use.mcp.server')`
+уже делает `importlib.import_module(...).main()`, а у нашего `server.py`
+сигнатура `main()` совпадает — `browser-use --mcp` теперь запускает наш код
+без правок диспетчера.
+
+Все реальные пути поправлены: статические импорты (`from bu_mcp.X import` во
+всех модулях `browser_use/mcp/` и в `bu_eval/{selftest,backends,upstream}.py`),
+ленивые `importlib.import_module('bu_mcp.X')` (`server_shared.bu_mcp_module`,
+`macro.py`, `journal.py`), строковые аргументы подпроцесса (`smoke.py`:
+`args=['-m', 'bu_mcp.server']` x2; `bench.py`: `argv=[...,'-m','bu_mcp.server']`),
+и критично — ключи `sys.modules['bu_mcp.journal']` в тестах отказоустойчивости
+журнала в `smoke.py` (иначе подмена модуля переставала перехватывать реальный
+`importlib.import_module('browser_use.mcp.journal')` внутри `journal.write()`,
+и тесты тихо проверяли бы не то). Логгеры (`logging.getLogger('bu_mcp.server')`)
+и вступительные докстроки тоже поправлены. НЕ тронуты намеренно: `BU_MCP_*`
+переменные окружения (публичный конфиг, путь кода на них не влияет), ключ
+`"bu-mcp"` в `~/.claude.json`/`mcp__bu-mcp__*` имена тулов (это имя MCP-сервера,
+а не модуля), бренд-упоминания "bu_mcp" в прозе бенчмарк-отчётов
+(`browser_use/mcp/bench.py`) и в `bu_eval/*` — там это название нашего слоя,
+не путь к коду.
+
+Удалены 2 CI-теста апстрима, привязанные к внутренностям штатного
+`BrowserUseServer` (`_execute_tool`, `_retry_with_browser_use_agent`, тулы
+`browser_get_state`/`retry_with_browser_use_agent`), которых у `BuMcpServer`
+нет: `tests/ci/test_mcp_tool_annotations.py` и
+`tests/ci/security/test_mcp_allowed_domains.py`. **Важно:** второй — это
+регрессионный тест на реальную уязвимость **GHSA-vfcm-843v-w6v3** (обход
+allowlist доменов через `retry_with_browser_use_agent` с
+`allowed_domains=[]` по умолчанию вместо `None`). Удалили по прямому решению
+пользователя, БЕЗ проверки, что `domain_gate.py` защищён от эквивалентной
+дыры на новой форме API — это осознанно принятый риск, а не забытая
+проверка. `tests/ci/test_mcp_client_error_result.py` не трогали — он тестирует
+`browser_use.mcp.client.MCPClient`, к `BrowserUseServer`/`BuMcpServer`
+отношения не имеет.
+
+Обновлено вне репозитория: `~/.claude.json` → `mcpServers.bu-mcp.args`
+(`["-m", "bu_mcp.server"]` → `["-m", "browser_use.mcp.server"]`), бэкап снят
+перед правкой. Остальные ключи (`command`, `env.PYTHONPATH`, сам ключ
+`"bu-mcp"`) не тронуты. После переноса живому MCP-подключению этой сессии
+нужен перезапуск (`/mcp`) — как и при переезде пути репозитория раньше.
+
+**Побочный эффект: A/B-бенчмарк сломан.** `browser_use/mcp/bench.py` сравнивал
+`STOCK` (`python -m browser_use.mcp`, тулы `browser_get_state`/...) с `OURS`
+(`python -m browser_use.mcp.server`, тулы `browser_state`/...). После переноса
+оба запускают один и тот же код — стокового `BrowserUseServer` в репозитории
+больше нет физически. `STOCK`-плечо теперь падает на `Unknown tool:
+browser_get_state` вместо честного сравнения. Не чинили: пришлось бы тащить
+старый `server.py` из истории git в отдельный путь только ради бенчмарка, а
+это отдельное решение. `bench_results.json` остаётся как протокол одного
+прошлого прогона, актуальным больше не является. Если бенчмарк снова понадобится
+— можно `git show <коммит до переноса>:bu_mcp/server.py` или сравнить с
+апстримным `browser_use/mcp/server.py` из отдельного чекаута.
+
 ## 2026-09-13 — server.py разбит на подмодули
 
 `bu_mcp/server.py` (3544 строки, один класс `BuMcpServer` на ~65 методов) резал

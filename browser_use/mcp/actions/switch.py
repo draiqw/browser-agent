@@ -10,7 +10,7 @@ from typing import Any
 
 import mcp.types as types
 
-from bu_mcp.server_shared import ToolError
+from browser_use.mcp.server_shared import ToolError
 
 
 class SwitchActionsMixin:

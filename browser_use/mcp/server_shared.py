@@ -1,10 +1,11 @@
-"""Общие константы, ошибки и схемы для bu_mcp.server и его подмодулей.
+"""Общие константы, ошибки и схемы для browser_use.mcp.server и его подмодулей.
 
 Вынесено из server.py при разбиении на подмодули (см. docs/WORKLOG.md), чтобы
 domain_gate.py / cdp_session.py / registry_bridge.py / noop.py / delta.py /
-bu_mcp/actions/* могли использовать эти константы без цикличного импорта
-bu_mcp.server (который, наоборот, импортирует их всех, чтобы собрать
-BuMcpServer). У этого модуля нет зависимостей на другие части bu_mcp.
+browser_use/mcp/actions/* могли использовать эти константы без цикличного
+импорта browser_use.mcp.server (который, наоборот, импортирует их всех, чтобы
+собрать BuMcpServer). У этого модуля нет зависимостей на другие части
+browser_use.mcp.
 """
 
 from __future__ import annotations
@@ -453,17 +454,17 @@ MACRO_NAME_RE = re.compile(r'^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$')
 
 
 def bu_mcp_module(module: str):
-	"""Импортировать ``bu_mcp.<module>`` лениво, с понятной ошибкой при провале.
+	"""Импортировать ``browser_use.mcp.<module>`` лениво, с понятной ошибкой при провале.
 
 	Модули пишутся параллельно с сервером, поэтому на момент старта их может не
 	быть. Сервер обязан подняться и отдать список инструментов в любом случае —
 	падать имеет право только тот вызов, которому модуль реально нужен.
 	"""
 	try:
-		return importlib.import_module(f'bu_mcp.{module}')
+		return importlib.import_module(f'browser_use.mcp.{module}')
 	except Exception as exc:
 		raise ToolError(
-			f'bu_mcp.{module} is unavailable ({type(exc).__name__}: {exc}). '
+			f'browser_use.mcp.{module} is unavailable ({type(exc).__name__}: {exc}). '
 			f'This tool is implemented on top of it and cannot run without it.'
 		) from exc
 
@@ -812,6 +813,6 @@ OVERRIDE_DESCRIPTIONS: dict[str, str] = {
 		'first. A step that cannot be resolved or does not reproduce FAILS the call — it never comes back as '
 		'a successful-looking report; the error names the step, so you can fix the page by hand and continue '
 		'with from_step, or re-teach the tail via macro_record ... replace_from. The same replay is available '
-		'without any model from a shell: `python -m bu_mcp.macro run NAME`.'
+		'without any model from a shell: `python -m browser_use.mcp.macro run NAME`.'
 	),
 }

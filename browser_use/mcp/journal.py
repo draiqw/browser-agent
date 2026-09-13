@@ -51,7 +51,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
-from bu_mcp.server_shared import NoopResultError, ToolError
+from browser_use.mcp.server_shared import NoopResultError, ToolError
 
 logger = logging.getLogger(__name__)
 
@@ -354,7 +354,7 @@ async def capture(session: Any, index: int | None = None) -> dict[str, Any]:
 
 	if index is not None:
 		try:
-			from bu_mcp import resolve as _resolve
+			from browser_use.mcp import resolve as _resolve
 
 			out['handle'] = await _resolve.describe_handle(session, int(index))
 		except Exception as exc:
@@ -1200,14 +1200,14 @@ def outcome(entry: dict[str, Any]) -> str:
 
 
 def write(entry: dict[str, Any]) -> None:
-	"""Отдать запись в ``bu_mcp.journal.record``. НИКОГДА не бросает наружу.
+	"""Отдать запись в ``browser_use.mcp.journal.record``. НИКОГДА не бросает наружу.
 
 	Журнал — наблюдатель, а не участник. Если модуля нет (например, тестовый
 	стаб в ``sys.modules``) или запись сломалась, действие всё равно обязано
 	вернуть клиенту свой результат: потерять журнал дешевле, чем потерять
 	действие. Поэтому и импорт, и сама запись гасятся в лог. Импорт лениво
 	через ``importlib``, а не прямой вызов локального ``record`` — так это
-	место остаётся перехватываемым (тесты подменяют ``sys.modules['bu_mcp.journal']``
+	место остаётся перехватываемым (тесты подменяют ``sys.modules['browser_use.mcp.journal']``
 	целиком, и запись обязана уважать подмену).
 	"""
 	started = time.perf_counter()
@@ -1215,9 +1215,9 @@ def write(entry: dict[str, Any]) -> None:
 		entry['outcome'] = outcome(entry)
 	entry['cost_ms'] = round(float(entry.get('cost_ms') or 0.0) + (time.perf_counter() - started) * 1000.0, 3)
 	try:
-		journal_mod = importlib.import_module('bu_mcp.journal')
+		journal_mod = importlib.import_module('browser_use.mcp.journal')
 	except Exception as exc:
-		logger.warning('bu_mcp.journal is unavailable, %s was not recorded: %r', entry.get('tool'), exc)
+		logger.warning('browser_use.mcp.journal is unavailable, %s was not recorded: %r', entry.get('tool'), exc)
 		return
 	try:
 		journal_mod.record(entry)
@@ -1241,7 +1241,7 @@ async def run_journaled(tool: str, args: dict[str, Any], run: Any) -> Any:
 		# Точка отсчёта для «что скачалось»: до действия, а не до проверки.
 		# Сам чекпоинт её не сдвигает — иначе он затирал бы то, что измеряет.
 		try:
-			importlib.import_module('bu_mcp.downloads').mark_baseline()
+			importlib.import_module('browser_use.mcp.downloads').mark_baseline()
 		except Exception:
 			pass
 	try:
@@ -1361,7 +1361,7 @@ if __name__ == '__main__':
 	async def main() -> int:
 		from browser_use.browser import BrowserProfile, BrowserSession
 		from browser_use.browser.events import CloseTabEvent
-		from bu_mcp import resolve as resolve_mod
+		from browser_use.mcp import resolve as resolve_mod
 
 		failures = 0
 		os.environ['BU_MCP_HOME'] = tempfile.mkdtemp(prefix='bu-mcp-journal-')

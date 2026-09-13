@@ -8,9 +8,9 @@ from __future__ import annotations
 import os
 from typing import TYPE_CHECKING
 
+from browser_use.mcp.server_shared import DOMAIN_EXEMPT, ToolError
 from browser_use.tools.registry.views import ActionRegistry
 from browser_use.utils import is_new_tab_page
-from bu_mcp.server_shared import DOMAIN_EXEMPT, ToolError
 
 if TYPE_CHECKING:
 	from browser_use.tools.service import Tools

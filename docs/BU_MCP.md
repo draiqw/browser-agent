@@ -1,7 +1,11 @@
-# bu_mcp — слой поверх browser-use
+# bu_mcp — свой MCP-сервер, заменяющий штатный в browser_use/mcp/
 
-Свой MCP-сервер поверх `browser-use`. Не форк: код browser-use не меняется,
-`bu_mcp` работает над его публичными слоями (`Tools()`, `BrowserSession`, DOM-сериализатор).
+Свой MCP-сервер (`browser_use.mcp.server.BuMcpServer`), физически на месте
+штатного `BrowserUseServer` апстрима — файл заменён целиком, а не добавлен
+рядом. Работает над публичными слоями `browser-use` (`Tools()`,
+`BrowserSession`, DOM-сериализатор), их код не трогает — но при обновлении
+апстрима именно этот файл (и соседние в `browser_use/mcp/`) будет
+конфликтовать почти всегда.
 
 ## Зачем
 
@@ -11,7 +15,7 @@
 **Формат состояния.** Штатный сервер шлёт `{index, tag, text, placeholder, href}` — без
 иерархии, без `aria-label`, без ролей. При этом внутри browser-use уже есть богатый формат
 (`SerializedDOMState.llm_representation`), который до MCP-клиента не доходит.
-`bu_mcp.state` отдаёт его плюс три приёма экономии: длинные `href` в хеш-плейсхолдер
+`browser_use.mcp.state` отдаёт его плюс три приёма экономии: длинные `href` в хеш-плейсхолдер
 с картой обратно, глифы иконочных шрифтов в `[icon]`, псевдо-дропдауны как `<select>`.
 
 Замерено: example.com 686 → 205 символов (−70%), github.com/browser-use 32 077 → 20 866
@@ -22,7 +26,7 @@
 **Ожидания.** `minimum_wait_page_load_time` и `wait_for_network_idle_page_load_time`
 объявлены, мапятся на env и не читаются нигде — мёртвый код. Реальная стабилизация —
 одна проверка ресурсов и `sleep(0.3)`; навигация после клика не ожидается вовсе.
-`bu_mcp.waiting` даёт лестницу fail-open: индикаторы загрузки → сетевая тишина →
+`browser_use.mcp.waiting` даёт лестницу fail-open: индикаторы загрузки → сетевая тишина →
 тишина MutationObserver (мутации атрибутов считаются только на элементах с ненулевым
 `getBoundingClientRect`). Плюс `wait_after_navigation` по `loaderId`.
 
@@ -34,7 +38,7 @@
 в мягкое «page may have changed». Хуже: если узел жив как объект, но выкинут из дерева
 (`isConnected === false`), из кеша возвращается **мёртвый узел** как ни в чём не бывало.
 
-`bu_mcp.resolve` проверяет живость в два приёма и перед отказом пробует переидентификацию:
+`browser_use.mcp.resolve` проверяет живость в два приёма и перед отказом пробует переидентификацию:
 `backendNodeId` → xpath → accessible name → уникальный атрибут. Fail closed: больше одного
 кандидата — `AmbiguousHandleError`, первый не берётся. Два гарда против ложных совпадений:
 ступень xpath отключается при смене URL страницы, и отвергает кандидата, если у него не
@@ -71,10 +75,15 @@ scripts/chrome-automation.sh hide     # убрать обратно
 scripts/chrome-automation.sh install  # поднимать при входе в систему
 scripts/chrome-automation.sh stop
 
-PYTHONPATH=. python -m bu_mcp.server  # сам сервер, транспорт stdio
-PYTHONPATH=. python bu_mcp/smoke.py   # проверки на живом браузере
-PYTHONPATH=. python -m bu_mcp.macro run ИМЯ   # повтор макроса без модели
+PYTHONPATH=. python -m browser_use.mcp.server  # сам сервер, транспорт stdio
+PYTHONPATH=. python browser_use/mcp/smoke.py   # проверки на живом браузере
+PYTHONPATH=. python -m browser_use.mcp.macro run ИМЯ   # повтор макроса без модели
 ```
+
+Минимальный самописный MCP-клиент на Python (без Claude Code, без агента с
+LLM в цикле) — [`examples/mcp/`](../examples/mcp/). Оценка агента с LLM в
+цикле на этом слое — [`examples/eval/`](../examples/eval/) (указывает на
+`bu_eval`, деньги/ключ провайдера нужны).
 
 Вкладки создаются фоновыми (`background=true`), а окно спрятано, поэтому Chrome
 считает страницу невидимой и не отдаёт ей ввод. Лечится эмуляцией фокуса на каждой
@@ -121,9 +130,9 @@ BU_MCP_CDP_URL=http://127.0.0.1:9223  # так bu-mcp пойдёт в этот �
 Повтор — `macro_run(name=...)` из агента или без агента и без модели:
 
 ```bash
-PYTHONPATH=. python -m bu_mcp.macro run chatgpt-ask --var question="..."
-PYTHONPATH=. python -m bu_mcp.macro list
-PYTHONPATH=. python -m bu_mcp.macro run chatgpt-ask --from 3 --no-strict --json
+PYTHONPATH=. python -m browser_use.mcp.macro run chatgpt-ask --var question="..."
+PYTHONPATH=. python -m browser_use.mcp.macro list
+PYTHONPATH=. python -m browser_use.mcp.macro run chatgpt-ask --from 3 --no-strict --json
 ```
 
 CLI открывает свою фоновую вкладку в автоматизационном Chrome (порт берётся из
@@ -147,7 +156,7 @@ CLI открывает свою фоновую вкладку в автомат�
 
 ## Прикладывание файлов
 
-Файлы агент берёт из одной папки — `bu_mcp/uploads/` в репозитории (рядом с
+Файлы агент берёт из одной папки — `browser_use/mcp/uploads/` в репозитории (рядом с
 кодом, менять через `BU_MCP_UPLOAD_DIR`). Это граница безопасности: приложить
 можно только то, что лежит в папке, остальная машина недоступна. Сами файлы в
 git не попадают.
@@ -174,7 +183,7 @@ upload_file file="pics/logo.png" # вложенные подпапки тоже 
 ## Скачивание результата
 
 Обратная сторона вложений: то, что страница отдаёт браузеру, складывается в
-`bu_mcp/downloads/` (меняется через `BU_MCP_DOWNLOAD_DIR`). Без этого файл
+`browser_use/mcp/downloads/` (меняется через `BU_MCP_DOWNLOAD_DIR`). Без этого файл
 уезжал бы во временный каталог со случайным именем — формально скачан, найти
 невозможно. Содержимое папки в git не попадает.
 

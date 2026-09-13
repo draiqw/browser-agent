@@ -176,7 +176,7 @@ class BrowserUseBackend:
 	async def run(self, task: Task, model: str, profile: Profile, max_steps: int) -> RunReport:
 		from browser_use import Agent
 		from browser_use.browser import BrowserSession
-		from bu_mcp.bench import cdp_pages
+		from browser_use.mcp.bench import cdp_pages
 
 		rep = RunReport(task=task.name, model=model, profile=profile.name, backend=self.name)
 		started = time.time()
@@ -239,7 +239,7 @@ async def _restore_tabs(foreign: dict[str, str], rep: RunReport) -> None:
 	  пустой таб вместо открытия нового (замерено). Её не закрываем — открывали
 	  не мы, — а возвращаем на about:blank.
 	"""
-	from bu_mcp.bench import cdp_eval, cdp_pages
+	from browser_use.mcp.bench import cdp_eval, cdp_pages
 
 	try:
 		now = {t['id']: (t.get('url') or '') for t in cdp_pages()}
@@ -396,7 +396,7 @@ async def mcp_session(profile: Profile, rep: RunReport):
 	дисциплина вкладок, один и тот же фильтр инструментов. Разница между
 	бэкендами должна быть ровно в том, кто принимает решения.
 	"""
-	from bu_mcp.bench import CDP_URL, OURS, McpClient, cdp_pages
+	from browser_use.mcp.bench import CDP_URL, OURS, McpClient, cdp_pages
 
 	foreign = {t['id']: (t.get('url') or '') for t in cdp_pages()}
 	client = McpClient(OURS)
@@ -432,8 +432,8 @@ async def _bind_own_tab(client, foreign: dict[str, str]) -> tuple[str, bool]:
 	страницу — это авария, прогон прерывается. Так уже терялась чужая вкладка,
 	и повторять не будем.
 	"""
+	from browser_use.mcp.bench import McpError, cdp_pages
 	from bu_eval.fixtures import base_url
-	from bu_mcp.bench import McpError, cdp_pages
 
 	token = f'bueval-{uuid.uuid4().hex[:8]}'
 	marker = f'{base_url()}/#{token}'
@@ -460,7 +460,7 @@ async def _release_own_tab(cdp_url: str, own_tab: str | None, reused: bool, fore
 	Свою — закрыть по её target_id и только по нему. Взятую взаймы пустую —
 	не закрывать (её открывали не мы), а вернуть на about:blank.
 	"""
-	from bu_mcp.bench import cdp_eval, cdp_pages
+	from browser_use.mcp.bench import cdp_eval, cdp_pages
 
 	if own_tab and not reused:
 		try:

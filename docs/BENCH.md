@@ -4,7 +4,7 @@ Run: 2026-09-03 12:55:12 -> 2026-09-03 13:01:06 (main pass)
 Chrome: `Chrome/152.0.7977.65` headless, CDP `http://127.0.0.1:9222`  
 Python: `/Users/draiqws/browser-agent/.venv/bin/python`  
 Repeats per site per server: 3 (median reported)  
-Regenerate: `/Users/draiqws/browser-agent/.venv/bin/python -m bu_mcp.bench`
+Regenerate: `/Users/draiqws/browser-agent/.venv/bin/python -m browser_use.mcp.bench`
 
 This is a **re-run of the whole corpus after the three defects the first run exposed were
 fixed** (commit `87207752c`: the navigate/baseline race, the JSON-escape tax on the tree,
@@ -19,13 +19,13 @@ stage** (cost and yield, section "Hydration"), and a **side observation about ta
 
 ## Methodology
 
-Two MCP servers, driven over real stdio JSON-RPC by `bu_mcp/bench.py`, both attached to
+Two MCP servers, driven over real stdio JSON-RPC by `browser_use/mcp/bench.py`, both attached to
 the same already-running headless Chrome:
 
 | | command | state tool | navigate | click |
 |---|---|---|---|---|
 | **stock** | `python -m browser_use.mcp` | `browser_get_state` | `browser_navigate` | `browser_click` |
-| **ours** | `PYTHONPATH=/Users/draiqws/browser-agent BU_MCP_CDP_URL=http://127.0.0.1:9222 python -m bu_mcp.server` | `browser_state` | `browser_navigate` | `browser_click` |
+| **ours** | `PYTHONPATH=/Users/draiqws/browser-agent BU_MCP_CDP_URL=http://127.0.0.1:9222 python -m browser_use.mcp.server` | `browser_state` | `browser_navigate` | `browser_click` |
 
 Per site, per server, per repeat: `navigate(url)` then the state tool. Nothing else is
 called, and no site element is ever clicked.
@@ -356,7 +356,7 @@ and it is invisible in any size or latency measurement.
 
 ## Page readiness: is a navigation actually recognised?
 
-`bu_mcp.waiting.wait_after_navigation` runs a fail-open ladder and returns a `ready` verdict.
+`browser_use.mcp.waiting.wait_after_navigation` runs a fail-open ladder and returns a `ready` verdict.
 The stock server has no equivalent, so this section has one column.
 
 The previous run's headline defect was that the baseline `loaderId` was captured *after* the
@@ -468,7 +468,7 @@ sites that do not need it and 0.8-1.5s on the two that do, and it reports which 
 Not a benchmark metric; recorded because it was raised and it reproduces on demand. Left
 unfixed on purpose.
 
-`bu_mcp/state.py:502` decides which tab is the current one by value comparison:
+`browser_use/mcp/state.py:502` decides which tab is the current one by value comparison:
 
 ```python
 'current': tab.url == state.url and tab.title == state.title,
