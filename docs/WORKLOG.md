@@ -5,7 +5,45 @@
 причина правки, способ проверки и тупики, в которые не стоит ходить второй раз.
 
 Контракты модулей — [`CONTRACTS.md`](CONTRACTS.md), журнал и макросы —
-[`JOURNAL_CONTRACT.md`](JOURNAL_CONTRACT.md), обзор слоя — [`../BU_MCP.md`](../BU_MCP.md).
+[`JOURNAL_CONTRACT.md`](JOURNAL_CONTRACT.md), обзор слоя — [`BU_MCP.md`](BU_MCP.md).
+
+## 2026-09-13 — server.py разбит на подмодули
+
+`bu_mcp/server.py` (3544 строки, один класс `BuMcpServer` на ~65 методов) резал
+на части: доменный гейт, CDP-сессия, мост к реестру `Tools()`, классификация
+noop, дельта до/после действия — каждый в свой файл (`domain_gate.py`,
+`cdp_session.py`, `registry_bridge.py`, `noop.py`, `delta.py`) как
+mixin-классы, собранные в `BuMcpServer` множественным наследованием. Тулы по
+группам действий — в `bu_mcp/actions/` (`navigate.py`, `interact.py`,
+`capture.py`, `scroll.py`, `switch.py`, `files.py`, `macros.py`). Общие
+константы, JS-сниппеты и схемы тулов — в `server_shared.py`. `server.py` стал
+тонкой сборкой на 321 строку.
+
+Логика journal/macro-тулов, которая была встроена в `server.py` вперемешку с
+остальным, уехала в уже существующие `bu_mcp/journal.py` и `bu_mcp/macro.py`.
+Методы там не трогали `self`, поэтому стали обычными функциями модуля, а не
+методами-обёртками. `journal.write()` нарочно оставлен с ленивым
+`importlib.import_module('bu_mcp.journal')` внутри самого модуля — на прямой
+подмене `sys.modules['bu_mcp.journal']` стоят тесты отказоустойчивости
+журнала, и обычный вызов сломал бы эту перехватываемость.
+
+Три места чуть не сломались молча (fail-soft маскировал бы регрессию):
+`macro.py` читал JS-сниппет через `getattr(server, '_DELTA_PROBE_JS', None)` —
+источник переехал в `server_shared.DELTA_PROBE_JS`; `smoke.py` доставал
+приватные методы `_journal_open/_write/...` через `getattr(BuMcpServer, ...)` —
+переключил на прямые импорты из новых модулей; `server.py` перестал
+экспортировать `JOURNAL_FIELDS`, который `smoke.py` тоже читает через
+`getattr` — вернули реэкспортом.
+
+Проверено: `ruff check`/`format` чисто. `pyright bu_mcp/server.py` (реальная
+точка входа, где всё собрано) — 0 ошибок; `pyright` на отдельных файлах
+миксинов даёт 109 `reportAttributeAccessIssue` — ожидаемый побочный эффект
+паттерна (каждый файл типизируется в изоляции от `self`, который на самом деле
+собран из всех миксинов) — не правили, ради этой метрики проект отдельные
+файлы не проверяет. `bu_mcp/smoke.py` до и после — оба раза упирается в один и
+тот же открытый дефект (см. следующий пункт, таймаут `Page.captureScreenshot`):
+после рефакторинга 78 PASS / 1 FAIL, все pure contract-тесты прошли,
+поведение перенесённой логики не изменилось.
 
 ## 2026-09-13 — репозиторий переехал в `~/browser-agent`
 
